@@ -32,6 +32,7 @@ const CONFIG = {
   segmentos: 15,            // 12 a 20 segmentos por cuerda (RF-03)
   longitudHilo: 150,        // longitud base del hilo en píxeles
   iteracionesConstraint: 10, // vueltas del solver de constraints (cuerda firme)
+  graciaCuerda: 30,          // frames que se conserva la cuerda si la mano se pierde (evita parpadeo)
   debug: {
     radioPunta: 11,
     radioArticulacion: 6,
@@ -208,12 +209,16 @@ const esquema = (p) => {
 
         cuerda.pin(punta.x, punta.y);
         cuerda.update(CONFIG.gravedad, CONFIG.amortiguacion, CONFIG.iteracionesConstraint);
+        cuerda.frame = p.frameCount;
       }
     }
 
-    // Las cuerdas de manos que ya no están se limpian.
-    for (const clave of cuerdas.keys()) {
-      if (!activas.has(clave)) cuerdas.delete(clave);
+    // Las cuerdas de manos que ya no están se conservan un rato: si la
+    // detección pierde un frame, el hilo no debe parpadear. Después se borran
+    // (la caída con gravedad de T8 entra más adelante).
+    for (const [clave, cuerda] of cuerdas) {
+      if (activas.has(clave)) continue;
+      if (p.frameCount - cuerda.frame > CONFIG.graciaCuerda) cuerdas.delete(clave);
     }
   }
 

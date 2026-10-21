@@ -41,6 +41,23 @@
     assert(__els.get('info-manos').textContent === '1', 'el chip informa 1 mano detectada');
     assert(__els.get('info-fps').textContent !== '—', 'el chip informa los FPS');
     assert(__els.get('estado').classList.contains('oculto'), 'el overlay de estado se oculta al arrancar');
+
+    // --- T4: una cuerda por punta y sin parpadeo si la detección pierde un frame ---
+    // Cada cuerda se dibuja en 2 trazos (halo + hilo) → 2 beginShape por cuerda.
+    p.beginShapeCalls = 0;
+    p.draw();
+    assert(p.beginShapeCalls === 10, 'se dibuja una cuerda por punta (5 cuerdas x 2 trazos): ' + p.beginShapeCalls);
+
+    global.__ml5.detectStart.cb([]);            // la mano desaparece
+    p.frameCount += 5;
+    p.beginShapeCalls = 0;
+    p.draw();
+    assert(p.beginShapeCalls === 10, 'la cuerda se conserva durante la gracia (no parpadea)');
+
+    p.frameCount += 40;
+    p.beginShapeCalls = 0;
+    p.draw();
+    assert(p.beginShapeCalls === 0, 'pasada la gracia, la cuerda se elimina');
   }
 
   if (__escenario === 'sin-permiso') {

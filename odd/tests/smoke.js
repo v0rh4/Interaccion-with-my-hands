@@ -53,7 +53,7 @@ class P5Stub {
   pixelDensity() {} frameRate() {} background() {} push() {} pop() {}
   translate() {} scale() {} image() {} rect() {} fill() {} noStroke() {}
   stroke() {} strokeWeight() {} circle() {} line() {} noFill() {}
-  beginShape() {} vertex() {} endShape() {} strokeCap() {}
+  beginShape() { this.beginShapeCalls = (this.beginShapeCalls || 0) + 1; } vertex() {} endShape() {} strokeCap() {}
   textSize() {} textAlign() {} text() {}
   color(r, g, b, a) { return { r, g, b, a }; }
   createCapture(type, opciones) {
