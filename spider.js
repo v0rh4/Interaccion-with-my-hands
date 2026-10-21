@@ -26,6 +26,9 @@ const ANCLAJE_PATAS = [
   { x: -8, y: 4 }
 ];
 
+/** Velocidad (px/s) a partir de la cual la araña se agita al máximo. */
+const VELOCIDAD_AGITACION = 900;
+
 class Spider {
   /**
    * @param {object} opciones { tamano, fase, p } — tamaño y fase propios por
@@ -55,6 +58,8 @@ class Spider {
     this.vuelcoVel = 0;
     this.tiempo = 0;
     this.velocidad = 0;           // velocidad de la punta (px/s)
+    this.agitacion = 0;           // 0..1.5: cuánto se agita por la velocidad
+    this.opacidad = 1;            // para el desvanecimiento de T8
 
     // Estado de cada pata: coxa, inicio de fémur, rodilla y pie.
     this.patas = [];
@@ -87,6 +92,9 @@ class Spider {
     // La cabeza mira hacia el hilo: el ángulo de la cuerda apunta hacia abajo,
     // así que hacia el ancla va el ángulo + PI (spec.md §6, S20).
     this.rotacion = angle + Math.PI;
+
+    // Agitación: si el dedo se mueve rápido, la araña se agita (RF-07).
+    this.agitacion = Math.min(1.5, this.velocidad / VELOCIDAD_AGITACION);
 
     // La araña se torsiona lento mientras cuelga, y más rápido cuando el hilo
     // se sacude: por eso el rojo del vientre va apareciendo y desapareciendo (S16).
@@ -123,16 +131,23 @@ class Spider {
       const angLocal = ANGULOS_PATAS[pata.indice] * Math.PI / 180;
 
       // --- Ciclo colgante: pataleo global + fase propia + ruido asimétrico ---
-      const ciclo = this.tiempo * 2.1 + pata.fase;
-      const pataleo = Math.sin(this.tiempo * 0.85 + this.fase);
+      // Con la mano rápido, el ciclo se acelera y se agita más (RF-07).
+      const agit = this.agitacion;
+      const ciclo = this.tiempo * (2.1 + agit * 3.5) + pata.fase;
+      const pataleo = Math.sin(this.tiempo * (0.85 + agit * 1.6) + this.fase);
       const ruidoPata = this.ruido(pata.indice * 7.3 + (pata.lado > 0 ? 0 : 31.7), this.tiempo * 0.5);
 
-      let alcance = alcanceMax * (0.62 + 0.12 * Math.sin(ciclo) + 0.09 * pataleo + 0.14 * (ruidoPata - 0.5));
+      let alcance = alcanceMax * (
+        0.62
+        + (0.12 + 0.10 * agit) * Math.sin(ciclo)
+        + (0.09 + 0.12 * agit) * pataleo
+        + 0.14 * (ruidoPata - 0.5)
+      );
       alcance = Math.max(alcanceMax * 0.35, Math.min(alcanceMax * 0.98, alcance));
 
       // Dirección de la pata en el mundo (el lado -y espeja el ángulo).
       const angMundo = rot + angLocal * pata.lado;
-      const desvio = (ruidoPata - 0.5) * 0.25;
+      const desvio = (ruidoPata - 0.5) * (0.25 + 0.35 * agit);
       const dirX = Math.cos(angMundo + desvio);
       const dirY = Math.sin(angMundo + desvio);
 
@@ -208,14 +223,15 @@ class Spider {
     const escala = this.tamano;
     const vuelta = Math.abs(Math.sin(this.vuelco));
     const anchoCuerpo = 0.6 + 0.4 * vuelta;
+    const opacidad = Math.max(0, Math.min(1, this.opacidad));
 
-    this.dibujarPatas(p, -1, escala);              // lado lejano, detrás del cuerpo
-    this.dibujarCuerpo(p, escala, anchoCuerpo, vuelta);
-    this.dibujarPatas(p, 1, escala);               // lado cercano, delante
+    this.dibujarPatas(p, -1, escala, opacidad);   // lado lejano, detrás del cuerpo
+    this.dibujarCuerpo(p, escala, anchoCuerpo, vuelta, opacidad);
+    this.dibujarPatas(p, 1, escala, opacidad);    // lado cercano, delante
   }
 
   /** Dibuja las 4 patas de un lado. */
-  dibujarPatas(p, lado, escala) {
+  dibujarPatas(p, lado, escala, opacidad) {
     p.noFill();
     p.strokeCap(p.ROUND);
     p.strokeJoin(p.ROUND);
@@ -225,7 +241,7 @@ class Spider {
 
       // El lado lejano se ve más apagado (está detrás del cuerpo).
       const tono = lado > 0 ? 34 : 22;
-      p.stroke(tono, tono + 2, tono + 8, 240);
+      p.stroke(tono, tono + 2, tono + 8, 240 * opacidad);
       p.strokeWeight(1.9 * escala);
       p.line(pata.coxa.x, pata.coxa.y, pata.hueso.x, pata.hueso.y);
       p.strokeWeight(1.25 * escala);
@@ -235,13 +251,13 @@ class Spider {
 
       // Articulación: un brillo mínimo en la rodilla.
       p.noStroke();
-      p.fill(tono + 26, tono + 26, tono + 34, 220);
+      p.fill(tono + 26, tono + 26, tono + 34, 220 * opacidad);
       p.circle(pata.rodilla.x, pata.rodilla.y, 2.1 * escala);
     }
   }
 
   /** Dibuja abdomen + cefalotórax + marca roja ventral. */
-  dibujarCuerpo(p, escala, anchoCuerpo, vuelta) {
+  dibujarCuerpo(p, escala, anchoCuerpo, vuelta, opacidad) {
     const rot = this.rotacion;
     const cos = Math.cos(rot);
     const sen = Math.sin(rot);
@@ -256,7 +272,7 @@ class Spider {
 
     // --- Abdomen: negro brillante ---
     p.noStroke();
-    p.fill(12, 11, 16, 255);
+    p.fill(12, 11, 16, 255 * opacidad);
     p.push();
     p.translate(abdX, abdY);
     p.rotate(rot);
@@ -264,36 +280,36 @@ class Spider {
     p.pop();
 
     // Brillo especular (S19).
-    this.brillo(p, abdX, abdY, rAbd * 0.62, rot, 0.30 + 0.12 * vuelta);
+    this.brillo(p, abdX, abdY, rAbd * 0.62, rot, 0.30 + 0.12 * vuelta, opacidad);
 
     // --- Marca de reloj de arena roja, sólo visible con el vientre en cámara ---
     if (vuelta > 0.02) {
-      this.marcaRoja(p, abdX, abdY, rot, rAbd, vuelta);
+      this.marcaRoja(p, abdX, abdY, rot, rAbd, vuelta, opacidad);
     }
 
     // --- Cefalotórax ---
     p.noStroke();
-    p.fill(16, 15, 20, 255);
+    p.fill(16, 15, 20, 255 * opacidad);
     p.push();
     p.translate(this.x, this.y);
     p.rotate(rot);
     p.ellipse(0, 0, rCef * 2.15, rCef * 1.7 * anchoCuerpo);
     p.pop();
 
-    this.brillo(p, this.x, this.y, rCef * 0.5, rot, 0.22);
+    this.brillo(p, this.x, this.y, rCef * 0.5, rot, 0.22, opacidad);
   }
 
   /**
    * Marca de reloj de arena roja en el vientre del abdomen.
    * Sólo se ve cuando la araña está panza arriba (S16).
    */
-  marcaRoja(p, x, y, rot, radio, visible) {
+  marcaRoja(p, x, y, rot, radio, visible, opacidad) {
     const cos = Math.cos(rot);
     const sen = Math.sin(rot);
     const largo = radio * 0.42;   // a lo largo del cuerpo
     const ancho = radio * 0.20;   // a lo ancho
 
-    const a = Math.max(0, Math.min(1, visible));
+    const a = Math.max(0, Math.min(1, visible)) * opacidad;
     const local = (lx, ly) => ({ x: x + lx * cos - ly * sen, y: y + lx * sen + ly * cos });
 
     const sup = [local(-largo, -ancho), local(-largo, ancho), local(0, 0)];
@@ -302,13 +318,13 @@ class Spider {
     // Halo suave alrededor de la marca.
     p.noStroke();
     p.fill(196, 24, 46, 45 * a);
-    this.triangulo(p, sup, 1.5);
-    this.triangulo(p, inf, 1.5);
+    this.triangulo(p, sup);
+    this.triangulo(p, inf);
 
     // La marca en sí.
     p.fill(214, 32, 52, 235 * a);
-    this.triangulo(p, sup, 1);
-    this.triangulo(p, inf, 1);
+    this.triangulo(p, sup);
+    this.triangulo(p, inf);
   }
 
   triangulo(p, puntos) {
@@ -320,16 +336,18 @@ class Spider {
   }
 
   /** Brillo especular: degradado radial sobre el cuerpo. */
-  brillo(p, x, y, radio, rot, fuerza) {
+  brillo(p, x, y, radio, rot, fuerza, opacidad) {
     if (!p.drawingContext) return;
+    const a = Math.max(0, Math.min(1, opacidad === undefined ? 1 : opacidad));
+    if (a < 0.02) return;
     const ctx = p.drawingContext;
     const hx = x - Math.cos(rot) * radio * 0.35;
     const hy = y - Math.sin(rot) * radio * 0.35;
 
     ctx.save();
     const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, radio);
-    g.addColorStop(0, 'rgba(210, 225, 255, ' + (0.42 * fuerza).toFixed(3) + ')');
-    g.addColorStop(0.45, 'rgba(150, 170, 210, ' + (0.12 * fuerza).toFixed(3) + ')');
+    g.addColorStop(0, 'rgba(210, 225, 255, ' + (0.42 * fuerza * a).toFixed(3) + ')');
+    g.addColorStop(0.45, 'rgba(150, 170, 210, ' + (0.12 * fuerza * a).toFixed(3) + ')');
     g.addColorStop(1, 'rgba(120, 140, 190, 0)');
     ctx.fillStyle = g;
     ctx.beginPath();

@@ -21,6 +21,8 @@ class Rope {
     this.longitud = longitud;
     this.largoSegmento = longitud / this.segmentos;
     this.puntos = [];
+    this.anclada = true;   // si está suelta, la cuerda cae libre (T8)
+    this.saltoMaximo = 60; // teletransporte del ancla: la cuerda la acompaña
     this.reiniciar(x, y);
   }
 
@@ -39,10 +41,35 @@ class Rope {
    */
   pin(x, y) {
     const ancla = this.puntos[0];
+    const dx = x - ancla.x;
+    const dy = y - ancla.y;
+
+    // Si el ancla se teletransporta (la mano reapareció en otro lado del
+    // cuadro) la cuerda se mueve entera con ella. Si no, ese tirón se
+    // convierte en una velocidad enorme y el hilo se enreda.
+    if (Math.hypot(dx, dy) > this.saltoMaximo) {
+      for (const p of this.puntos) {
+        p.x += dx;
+        p.y += dy;
+        p.px += dx;
+        p.py += dy;
+      }
+    }
+
     ancla.x = x;
     ancla.y = y;
     ancla.px = x;
     ancla.py = y;
+  }
+
+  /** Suelta la cuerda: deja de estar anclada y cae libre (RF-08). */
+  soltar() {
+    this.anclada = false;
+  }
+
+  /** Vuelve a anclar la cuerda (la mano reapareció). */
+  anclar() {
+    this.anclada = true;
   }
 
   /**
@@ -66,8 +93,9 @@ class Rope {
     const damping = amortiguacion === undefined ? 0.98 : amortiguacion;
     const vueltas = iteraciones === undefined ? 6 : iteraciones;
 
-    // --- Integración Verlet (el punto 0 está anclado y no se integra) ---
-    for (let i = 1; i < puntos.length; i++) {
+    // --- Integración Verlet (el punto 0 no se integra si está anclado) ---
+    const desde = this.anclada ? 1 : 0;
+    for (let i = desde; i < puntos.length; i++) {
       const p = puntos[i];
       const vx = (p.x - p.px) * damping;
       const vy = (p.y - p.py) * damping;
@@ -87,7 +115,7 @@ class Rope {
         const d = Math.sqrt(dx * dx + dy * dy) || 0.0001;
         const diff = (d - this.largoSegmento) / d;
 
-        if (i === 0) {
+        if (i === 0 && this.anclada) {
           // El ancla no se mueve: sólo se ajusta el otro extremo del segmento.
           b.x -= dx * diff;
           b.y -= dy * diff;
@@ -120,20 +148,23 @@ class Rope {
   /**
    * Dibuja la cuerda: línea fina blanquecina semitransparente con un leve halo.
    * @param {p5} p instancia de p5
+   * @param {object} color tono del hilo
+   * @param {number} opacidad 0..1 (para el desvanecimiento de T8)
    */
-  dibujar(p, color) {
+  dibujar(p, color, opacidad) {
     const tono = color || { r: 226, g: 220, b: 205 };
+    const a = opacidad === undefined ? 1 : Math.max(0, Math.min(1, opacidad));
 
     p.noFill();
     p.strokeCap(p.ROUND);
 
     // Halo: da el brillo de la seda.
-    p.stroke(tono.r, tono.g, tono.b, 26);
+    p.stroke(tono.r, tono.g, tono.b, 26 * a);
     p.strokeWeight(3.2);
     this.trazar(p);
 
     // Hilo principal.
-    p.stroke(tono.r, tono.g, tono.b, 120);
+    p.stroke(tono.r, tono.g, tono.b, 120 * a);
     p.strokeWeight(1.1);
     this.trazar(p);
   }

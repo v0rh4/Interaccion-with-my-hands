@@ -9,6 +9,9 @@
   };
   const estado = () => __els.get('estado-titulo').textContent;
 
+  /** Avanza N frames del sketch (con el dt real, que es lo que mueve la caída). */
+  const avanzar = (n) => { for (let i = 0; i < n; i++) { p.frameCount++; p.draw(); } };
+
   // Mano sintética: 21 keypoints en píxeles del video (640x480)
   const keypoints = [];
   for (let i = 0; i < 21; i++) {
@@ -53,15 +56,22 @@
     assert(p.hiloCalls === 10, 'se dibuja una cuerda por punta (5 cuerdas x 2 trazos): ' + p.hiloCalls);
 
     global.__ml5.detectStart.cb([]);            // la mano desaparece
-    p.frameCount += 5;
+    avanzar(5);
     p.hiloCalls = 0;
     p.draw();
     assert(p.hiloCalls === 10, 'la cuerda se conserva durante la gracia (no parpadea)');
 
-    p.frameCount += 40;
+    // Pasada la gracia, la araña se suelta y cae: se sigue dibujando.
+    avanzar(40);
     p.hiloCalls = 0;
     p.draw();
-    assert(p.hiloCalls === 0, 'pasada la gracia, la cuerda se elimina');
+    assert(p.hiloCalls === 10, 'pasada la gracia la araña se suelta y cae (se sigue dibujando)');
+
+    // Un segundo después, desaparece.
+    avanzar(70);
+    p.hiloCalls = 0;
+    p.draw();
+    assert(p.hiloCalls === 0, 'un segundo después la araña desaparece');
   }
 
   if (__escenario === 'sin-webgl') {
@@ -169,11 +179,26 @@
   const cuerda2 = new Rope(400, 100, 150, 15);
   for (let i = 0; i < 30; i++) { cuerda2.pin(400, 100); cuerda2.update(0.55, 0.985, 6); }
   const quieta = cuerda2.endPoint();
-  cuerda2.pin(700, 100);
-  cuerda2.update(0.55, 0.985, 6);
-  assert(cuerda2.endPoint().x < 700 - 5,
+  // La mano se mueve 12 px por frame: la cuerda tiene que quedar atrás.
+  for (let i = 0; i < 6; i++) { cuerda2.pin(400 + 12 * (i + 1), 100); cuerda2.update(0.55, 0.985, 6); }
+  assert(cuerda2.endPoint().x < 400 + 72 - 5,
     'la cuerda no sigue al ancla al instante: hay inercia (RF-05)');
   assert(Math.abs(quieta.x - 400) < 3, 'una cuerda quieta queda vertical');
+
+  // Salto grande del ancla: la cuerda lo acompaña sin enredarse.
+  const cuerda3 = new Rope(400, 100, 150, 15);
+  for (let i = 0; i < 30; i++) { cuerda3.pin(400, 100); cuerda3.update(0.55, 0.985, 6); }
+  cuerda3.pin(900, 100);
+  for (let i = 0; i < 30; i++) { cuerda3.pin(900, 100); cuerda3.update(0.55, 0.985, 6); }
+  let maxSegmento = 0;
+  for (let i = 1; i < cuerda3.puntos.length; i++) {
+    maxSegmento = Math.max(maxSegmento, Math.hypot(
+      cuerda3.puntos[i].x - cuerda3.puntos[i - 1].x,
+      cuerda3.puntos[i].y - cuerda3.puntos[i - 1].y));
+  }
+  assert(maxSegmento < cuerda3.largoSegmento * 1.5,
+    'tras un salto grande la cuerda no se enreda (segmento máx ' + maxSegmento.toFixed(1) + ')');
+  assert(cuerda3.endPoint().y > 100 + 100, 'y sigue colgando con su largo');
 
   // --- T5/T6: la araña (cuerpo, marca roja, 8 patas con IK) ---
   const araña = new Spider({ tamano: 1, fase: 0.5, p: global.__p5[0] });
@@ -231,12 +256,72 @@
   assert(p.ellipseCalls === 10, 'se dibuja una araña por cuerda (5 arañas × 2 elipses): ' + p.ellipseCalls);
   assert(p.hiloCalls === 10, 'y una cuerda por araña: ' + p.hiloCalls);
 
+  // --- T7: el curl acorta el hilo y la araña sube por él ---
+  const manoAppEstirada = { keypoints: aPuntos(manoFalsa([0, 0, 0, 0, 0])), handedness: 'Right' };
+  const manoAppCerrada = { keypoints: aPuntos(manoFalsa([1, 1, 1, 1, 1])), handedness: 'Right' };
+
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(40)
+  const estirada = p.colgantes.get('Right-0');
+  const largoEstirado = estirada.cuerda.longitud;
+  const distEstirada = estirada.araña.y - estirada.cuerda.puntos[0].y;
+
+  global.__ml5.detectStart.cb([manoAppCerrada]);
+  avanzar(40)
+  const appCerrada = p.colgantes.get('Right-0');
+  const largoCerrado = appCerrada.cuerda.longitud;
+  const distCerrada = appCerrada.araña.y - appCerrada.cuerda.puntos[0].y;
+
+  assert(largoCerrado < largoEstirado * 0.7,
+    'el curl acorta el hilo: ' + Math.round(largoEstirado) + ' → ' + Math.round(largoCerrado) + ' px');
+  assert(distCerrada < distEstirada - 30,
+    'con el dedo doblado la araña sube por el hilo: ' + Math.round(distEstirada) + ' → ' + Math.round(distCerrada) + ' px');
+  assert(largoEstirado > CONFIG.longitudHilo * 0.8 && largoEstirado < CONFIG.longitudHilo * 1.2,
+    'con el dedo estirado el hilo tiene el largo completo (±15 % por dedo): ' + Math.round(largoEstirado));
+
+  // --- T7: la velocidad agita la araña ---
+  const arañaAgitada = new Spider({ tamano: 1, fase: 0, p: global.__p5[0] });
+  arañaAgitada.update({ x: 100, y: 100 }, Math.PI / 2, 0);
+  assert(arañaAgitada.agitacion === 0, 'sin movimiento la araña no se agita');
+  arañaAgitada.update({ x: 100, y: 100 }, Math.PI / 2, 2000);
+  assert(arañaAgitada.agitacion > 1, 'con la mano rápida la araña se agita: ' + arañaAgitada.agitacion.toFixed(2));
+
+  // --- T8: al perder la mano, la araña se suelta, cae y se desvanece ---
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(10)
+  const antesCaida = p.colgantes.get('Right-0');
+  const yAntesCaida = antesCaida.araña.y;
+
+  global.__ml5.detectStart.cb([]);            // la mano desaparece
+  avanzar(20)
+  const durante = p.colgantes.get('Right-0');
+  assert(durante !== undefined, 'durante la gracia la araña sigue colgada');
+  assert(durante.cuerda.anclada === true, 'durante la gracia sigue anclada');
+
+  avanzar(60)
+  const cayendo = p.colgantes.get('Right-0');
+  assert(cayendo !== undefined, 'la araña sigue existiendo mientras cae');
+  assert(cayendo.cuerda.anclada === false, 'la araña se soltó del hilo');
+  assert(cayendo.araña.y > yAntesCaida, 'la araña cae con gravedad: ' + Math.round(yAntesCaida) + ' → ' + Math.round(cayendo.araña.y));
+  assert(cayendo.opacidad < 1 && cayendo.opacidad > 0, 'la araña se desvanece: opacidad ' + cayendo.opacidad.toFixed(2));
+  assert(cayendo.araña.opacidad === cayendo.opacidad, 'la araña y el hilo comparten la opacidad');
+
+  avanzar(60)
+  assert(p.colgantes.get('Right-0') === undefined, 'pasado el segundo, la araña desaparece');
+
+  // --- T8: al volver la mano, la araña se engancha de nuevo ---
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(10)
+  const reenganchada = p.colgantes.get('Right-0');
+  assert(reenganchada !== undefined, 'la araña vuelve cuando la mano reaparece');
+  assert(reenganchada.cuerda.anclada === true, 'la araña se vuelve a enganchar');
+  assert(reenganchada.opacidad === 1, 'vuelve a verse opaca');
+
   console.log(fallos === 0 ? '\nTODAS LAS PRUEBAS OK\n' : '\n' + fallos + ' PRUEBAS FALLARON\n');
 })();
 
 /** Genera una mano de 21 puntos con el curl pedido por dedo (0 = estirado). */
-function manoFalsa(curls, desplazamientoX) {
-  const dx = desplazamientoX || 0;
+function manoFalsa(curls, desplazamientoX) {  const dx = desplazamientoX || 0;
   const pts = new Array(21);
   const poner = (i, x, y) => { pts[i] = { x: x + dx, y: y, z: 0, score: 1, name: Mano.NOMBRES[i] }; };
 
@@ -256,6 +341,11 @@ function manoFalsa(curls, desplazamientoX) {
   });
 
   return pts;
+}
+
+/** Convierte los puntos de la mano falsa en keypoints con nombre (formato ml5). */
+function aPuntos(puntos) {
+  return puntos.map((pt, i) => ({ x: pt.x, y: pt.y, score: 1, name: Mano.NOMBRES[i] }));
 }
 
 /** Escribe una cadena de falanges doblando según el curl (0 = recto, 1 = cerrado). */

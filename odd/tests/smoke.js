@@ -60,6 +60,8 @@ global.__p5 = [];
 class P5Stub {
   constructor(sketch) {
     this.width = 800; this.height = 600; this.frameCount = 0; this.key = '';
+    this.windowWidth = 800; this.windowHeight = 600;
+    this.deltaTime = 16;           // ms por frame (p5 lo calcula real)
     this.draws = 0;
     this.drawingContext = {
       save() {}, restore() {}, beginPath() {}, ellipse() {}, fill() {},
