@@ -85,9 +85,9 @@ Rama: `feature/black-widow-spiders` (se crea en el primer work-unit commit) · E
 | T6  | S38, S39, S18, S20 | Animación de patas con IK + ruido + rotación | inline | hecho | 23b847a |
 | T7  | S10, S11, S14 | curl → longitud del hilo, velocidad → agitación | inline | hecho | e660c16 |
 | T8  | S12, S13 | Caída y fade de arañas al perder la mano; 2 manos / 10 arañas | inline | hecho | e660c16 |
-| T9  | S22, S41 | Optimización, mensajes de estado, pulido visual | inline | hecho | (ver Log L34) |
-| T10 | S43-S47 | Sistema de audio procedural Halloween (p5.sound.js) | inline | hecho | (ver Log L35) |
-| T11 | S42 | `README.md` con cómo ejecutar (`python -m http.server` o Live Server) | inline | hecho | (ver Log L37) |
+| T9  | S22, S41 | Optimización, mensajes de estado, pulido visual | inline | hecho | 20bb805 |
+| T10 | S43-S47 | Sistema de audio procedural Halloween (p5.sound.js) | inline | hecho | 20bb805 |
+| T11 | S42 | `README.md` con cómo ejecutar (`python -m http.server` o Live Server) | inline | hecho | 20bb805 |
 
 Ruta declarada: todo inline salvo trigger de escritura en paralelo o de backstop de contexto (no se dispararon hasta ahora).
 
