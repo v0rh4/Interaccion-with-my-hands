@@ -2,7 +2,7 @@
  * sketch.js — Orquestación de la experiencia: cámara, modelo de manos y render.
  *
  * Flujo (spec.md §8): preload (crea handPose) → setup (canvas, video, detectStart)
- * → gotHands (guarda resultados) → draw (video espejo → keypoints de debug).
+ * → gotHands (guarda resultados) → draw (video espejo → actualizar cuerdas → render).
  *
  * Modo instancia de p5 (`new p5(esquema)`) para no ensuciar el scope global (RNF-03).
  */
@@ -24,6 +24,14 @@ const CONFIG = {
     // DECISIÓN: el espejado se hace al dibujar (espejo + x invertida), no acá.
     flipHorizontal: false
   },
+  suavizado: 0.35,          // lerp de los keypoints (RNF-02, rango 0.3-0.5)
+  factorVelocidad: 0.4,     // promediado de la velocidad por punta
+  saltoMaximo: 0.15,        // salto máximo (fracción de la diagonal) antes de reiniciar el suavizado
+  gravedad: 0.55,           // px por frame² (péndulo de la araña)
+  amortiguacion: 0.985,     // retención de velocidad del Verlet
+  segmentos: 15,            // 12 a 20 segmentos por cuerda (RF-03)
+  longitudHilo: 150,        // longitud base del hilo en píxeles
+  iteracionesConstraint: 10, // vueltas del solver de constraints (cuerda firme)
   debug: {
     radioPunta: 11,
     radioArticulacion: 6,
@@ -35,12 +43,16 @@ const esquema = (p) => {
   // ---- Estado interno del sketch ----
   let modelo = null;            // instancia de ml5 handPose
   let video = null;             // p5.MediaElement de la webcam
-  let manos = [];               // últimos resultados de ml5
+  let resultados = [];          // últimos resultados crudos de ml5
   let modeloListo = false;
   let videoListo = false;
   let deteccionIniciada = false;
   let mostrarDebug = false;     // tecla D
   let ultimoUpdateInfo = 0;
+
+  const seguimiento = new Mano.Seguimiento();  // suavizado, curl y velocidad
+  const cuerdas = new Map();                    // clave: 'handedness-indiceDedo'
+  const variacionHilo = [1, 1, 1, 1, 1];       // ±15 % por dedo (RF-10)
 
   p.preload = () => {
     // ml5 v1: handPose() devuelve la instancia de inmediato; el modelo se carga
@@ -53,15 +65,31 @@ const esquema = (p) => {
     p.pixelDensity(1); // menos fill-rate = más FPS (RNF-01)
     p.frameRate(60);
 
+    // Cada dedo con su propio largo de hilo (RF-10).
+    for (let i = 0; i < variacionHilo.length; i++) {
+      variacionHilo[i] = 1 + (Math.random() * 0.3 - 0.15);
+    }
+
     setEstado('Cargando modelo…', 'Preparando el detector de manos…');
     esperarModelo();
     iniciarCamara();
   };
 
   p.draw = () => {
+    const dt = p.deltaTime / 1000;
+    const mapa = crearMapa();
+    const manos = seguimiento.actualizar(resultados, mapa, dt, {
+      suavizado: CONFIG.suavizado,
+      factorVelocidad: CONFIG.factorVelocidad,
+      saltoMaximo: CONFIG.saltoMaximo
+    });
+
+    actualizarCuerdas(manos);
+
     dibujarFondo(p);
-    if (mostrarDebug) dibujarKeypoints(p);
-    actualizarInfo(p);
+    dibujarCuerdas(p);
+    if (mostrarDebug) dibujarDebug(p, manos);
+    actualizarInfo(p, manos);
   };
 
   p.keyPressed = () => {
@@ -137,12 +165,55 @@ const esquema = (p) => {
     try {
       // ml5 v1: detectStart(elemento de video, callback) — loop continuo (RNF-04).
       // ml5 developmenta el p5.MediaElement y usa su <video> real.
-      modelo.detectStart(video, (resultados) => {
-        manos = resultados || [];
+      modelo.detectStart(video, (manosDetectadas) => {
+        resultados = manosDetectadas || [];
       });
       ocultarEstado();
     } catch (err) {
       setEstado('Error al iniciar la detección', mensajeError(err), true);
+    }
+  }
+
+  // --------------------------------------------------------------- cuerdas ---
+
+  /** Mapa de coordenadas video→canvas para el frame actual. */
+  function crearMapa() {
+    const anchoVideo = video && video.elt ? video.elt.videoWidth : CONFIG.video.ancho;
+    const altoVideo = video && video.elt ? video.elt.videoHeight : CONFIG.video.alto;
+    return Mano.crearMapa(anchoVideo, altoVideo, p.width, p.height);
+  }
+
+  /**
+   * Ancla una cuerda por punta de dedo y las actualiza.
+   * Clave: 'handedness-indiceDedo' (spec.md §8).
+   */
+  function actualizarCuerdas(manos) {
+    const activas = new Set();
+
+    for (const mano of manos) {
+      for (const punta of mano.puntas) {
+        const clave = mano.handedness + '-' + punta.indice;
+        activas.add(clave);
+
+        let cuerda = cuerdas.get(clave);
+        if (!cuerda) {
+          cuerda = new Rope(
+            punta.x,
+            punta.y,
+            CONFIG.longitudHilo * variacionHilo[punta.indice],
+            CONFIG.segmentos
+          );
+          cuerdas.set(clave, cuerda);
+        }
+
+        cuerda.pin(punta.x, punta.y);
+        cuerda.update(CONFIG.gravedad, CONFIG.amortiguacion, CONFIG.iteracionesConstraint);
+      }
+    }
+
+    // Las cuerdas de manos que ya no están se limpian.
+    for (const clave of cuerdas.keys()) {
+      if (!activas.has(clave)) cuerdas.delete(clave);
     }
   }
 
@@ -165,19 +236,18 @@ const esquema = (p) => {
     p2.rect(0, 0, p2.width, p2.height);
   }
 
-  function dibujarKeypoints(p2) {
-    if (!video || !video.elt || !video.elt.videoWidth) return;
+  function dibujarCuerdas(p2) {
+    p2.push();
+    for (const cuerda of cuerdas.values()) {
+      cuerda.dibujar(p2);
+    }
+    p2.pop();
+  }
 
-    const mapa = Mano.crearMapa(
-      video.elt.videoWidth,
-      video.elt.videoHeight,
-      p2.width,
-      p2.height
-    );
-
+  function dibujarDebug(p2, manos) {
+    p2.push();
     for (const mano of manos) {
-      const puntos = Mano.extraer(mano, video.elt.videoWidth, video.elt.videoHeight);
-      if (!puntos) continue;
+      const puntos = mano.puntos;
 
       // Esqueleto
       p2.stroke(140, 40, 55, CONFIG.debug.alfaEsqueleto);
@@ -186,7 +256,7 @@ const esquema = (p) => {
         const a = puntos[par[0]];
         const b = puntos[par[1]];
         if (!a || !b) continue;
-        p2.line(mapa.aCanvasX(a.x), mapa.aCanvasY(a.y), mapa.aCanvasX(b.x), mapa.aCanvasY(b.y));
+        p2.line(a.x, a.y, b.x, b.y);
       }
 
       // Los 21 keypoints; las 5 puntas en rojo (son los anclajes de las arañas).
@@ -195,15 +265,34 @@ const esquema = (p) => {
         const esPunta = Mano.PUNTAS.indexOf(i) !== -1;
         p2.fill(esPunta ? p2.color(228, 70, 92) : p2.color(235, 230, 215));
         p2.circle(
-          mapa.aCanvasX(puntos[i].x),
-          mapa.aCanvasY(puntos[i].y),
+          puntos[i].x,
+          puntos[i].y,
           esPunta ? CONFIG.debug.radioPunta : CONFIG.debug.radioArticulacion
         );
       }
+
+      // Curl y velocidad de cada punta.
+      p2.textSize(11);
+      p2.textAlign(p2.LEFT, p2.BOTTOM);
+      for (const punta of mano.puntas) {
+        p2.fill(228, 70, 92, 220);
+        p2.text(
+          Math.round(punta.curl * 100) + '%',
+          punta.x + 9,
+          punta.y - 6
+        );
+        p2.fill(150, 200, 255, 200);
+        p2.text(
+          Math.round(punta.velocidad),
+          punta.x + 9,
+          punta.y + 16
+        );
+      }
     }
+    p2.pop();
   }
 
-  function actualizarInfo(p2) {
+  function actualizarInfo(p2, manos) {
     if (p2.frameCount - ultimoUpdateInfo < 10) return;
     ultimoUpdateInfo = p2.frameCount;
     document.getElementById('info-manos').textContent = String(manos.length);
@@ -240,7 +329,7 @@ function mensajeCamara(err) {
     return 'No se encontró ninguna cámara conectada.';
   }
   if (nombre === 'NotReadableError' || nombre === 'TrackStartError') {
-    return 'La cámara ya está siendo usada por otra aplicación. Cerrá la otra pestaña y recargá.';
+    return 'La cámara está siendo usada por otra aplicación. Cerrá la otra pestaña y recargá.';
   }
   return 'No se pudo abrir la cámara (' + (nombre || 'error desconocido') + '). Revisá el permiso y recargá la página.';
 }

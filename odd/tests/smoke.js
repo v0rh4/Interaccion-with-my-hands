@@ -1,0 +1,121 @@
+/**
+ * Smoke test (Node) para sketch.js + hand.js sin navegador.
+ * Simula p5, ml5, document y navigator.mediaDevices para ejercitar el flujo real.
+ * Uso: node smoke.js <escenario>
+ *   escenarios: ok | sin-permiso | error-modelo
+ */
+const fs = require('fs');
+const vm = require('vm');
+const path = require('path');
+
+const RAIZ = path.resolve(__dirname, '..', '..');
+const escenario = process.argv[2] || 'ok';
+global.__escenario = escenario;
+
+// ---------------------------------------------------------------- stubs DOM
+class FakeClassList {
+  constructor() { this.s = new Set(); }
+  add(c) { this.s.add(c); }
+  remove(c) { this.s.delete(c); }
+  toggle(c, f) {
+    if (f === undefined) { this.s.has(c) ? this.s.delete(c) : this.s.add(c); }
+    else { f ? this.s.add(c) : this.s.delete(c); }
+  }
+  contains(c) { return this.s.has(c); }
+}
+
+const els = new Map();
+global.__els = els;
+function el(id) {
+  if (!els.has(id)) els.set(id, { id, textContent: '', classList: new FakeClassList(), style: {} });
+  return els.get(id);
+}
+
+global.document = {
+  getElementById: el,
+  createElement: () => ({ style: {}, setAttribute() {}, addEventListener() {}, getContext: () => ({}) }),
+  body: { appendChild() {} }
+};
+global.window = global;
+
+// ---------------------------------------------------------------- stub p5
+global.__p5 = [];
+class P5Stub {
+  constructor(sketch) {
+    this.width = 800; this.height = 600; this.frameCount = 0; this.key = '';
+    this.draws = 0;
+    global.__p5.push(this);
+    sketch(this);
+    if (this.preload) this.preload();
+    if (this.setup) this.setup();
+  }
+  createCanvas(w, h) { this.width = w; this.height = h; return { parent() {}, style() {} }; }
+  pixelDensity() {} frameRate() {} background() {} push() {} pop() {}
+  translate() {} scale() {} image() {} rect() {} fill() {} noStroke() {}
+  stroke() {} strokeWeight() {} circle() {} line() {} noFill() {}
+  beginShape() {} vertex() {} endShape() {} strokeCap() {}
+  textSize() {} textAlign() {} text() {}
+  color(r, g, b, a) { return { r, g, b, a }; }
+  createCapture(type, opciones) {
+    const listeners = {};
+    const video = {
+      elt: {
+        readyState: 4,
+        videoWidth: 640,
+        videoHeight: 480,
+        addEventListener(ev, cb) { (listeners[ev] = listeners[ev] || []).push(cb); }
+      },
+      hide() {},
+      width: 640,
+      height: 480
+    };
+    // Dispara 'loadeddata' como lo haría el navegador.
+    setTimeout(() => (listeners['loadeddata'] || []).forEach((cb) => cb()), 0);
+    return video;
+  }
+}
+P5Stub.prototype.VIDEO = 'video';
+P5Stub.prototype.LEFT = 'left';
+P5Stub.prototype.BOTTOM = 'bottom';
+P5Stub.prototype.ROUND = 'round';
+P5Stub.prototype.AUDIO = 'audio';
+global.p5 = P5Stub;
+
+// --------------------------------------------------------------- stub ml5
+global.__ml5 = { llamadas: [], detectStart: null };
+global.ml5 = {
+  handPose(nombre, opciones) {
+    global.__ml5.llamadas.push({ nombre, opciones });
+    const ready = escenario === 'error-modelo'
+      ? Promise.reject(new Error('falló la descarga del modelo'))
+      : Promise.resolve('modelo');
+    return {
+      ready,
+      detectStart(media, cb) {
+        global.__ml5.detectStart = { media, cb };
+      }
+    };
+  }
+};
+
+// ------------------------------------------------------------ stub cámara
+Object.defineProperty(globalThis, 'navigator', { value: {
+  mediaDevices: {
+    getUserMedia: async () => {
+      if (escenario === 'sin-permiso') {
+        const e = new Error('Permission denied');
+        e.name = 'NotAllowedError';
+        throw e;
+      }
+      return { getTracks: () => [{ stop() {} }] };
+    }
+  }
+}, writable: true, configurable: true });
+
+// ------------------------------------------------------------------ código
+const hand = fs.readFileSync(path.join(RAIZ, 'hand.js'), 'utf8');
+const rope = fs.readFileSync(path.join(RAIZ, 'rope.js'), 'utf8');
+const sketch = fs.readFileSync(path.join(RAIZ, 'sketch.js'), 'utf8');
+const pruebas = fs.readFileSync(path.join(__dirname, 'smoke-pruebas.js'), 'utf8');
+
+vm.runInThisContext(hand + '\n' + rope + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });
