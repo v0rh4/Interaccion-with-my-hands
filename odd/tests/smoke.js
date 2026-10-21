@@ -11,6 +11,7 @@ const path = require('path');
 const RAIZ = path.resolve(__dirname, '..', '..');
 const escenario = process.argv[2] || 'ok';
 global.__escenario = escenario;
+global.__sinWebGL = escenario === 'sin-webgl';
 
 // ---------------------------------------------------------------- stubs DOM
 class FakeClassList {
@@ -33,10 +34,26 @@ function el(id) {
 
 global.document = {
   getElementById: el,
-  createElement: () => ({ style: {}, setAttribute() {}, addEventListener() {}, getContext: () => ({}) }),
+  createElement: (tag) => ({
+    style: {},
+    setAttribute() {},
+    addEventListener() {},
+    getContext: (tipo) => {
+      // Firefox lanza DOMException cuando WebGL está deshabilitado.
+      if (tipo === 'webgl2' || tipo === 'webgl') {
+        if (global.__sinWebGL) {
+          const e = new Error('WebGL disabled');
+          throw e;
+        }
+        return { __contexto: tipo };
+      }
+      return {};
+    }
+  }),
   body: { appendChild() {} }
 };
 global.window = global;
+global.WebGLRenderingContext = function () {};
 
 // ---------------------------------------------------------------- stub p5
 global.__p5 = [];

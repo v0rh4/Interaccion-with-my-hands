@@ -48,6 +48,7 @@ const esquema = (p) => {
   let modeloListo = false;
   let videoListo = false;
   let deteccionIniciada = false;
+  let webglDisponible = true;  // si el navegador puede crear un contexto WebGL
   let mostrarDebug = false;     // tecla D
   let ultimoUpdateInfo = 0;
 
@@ -56,6 +57,13 @@ const esquema = (p) => {
   const variacionHilo = [1, 1, 1, 1, 1];       // ±15 % por dedo (RF-10)
 
   p.preload = () => {
+    // DECISIÓN: la detección de manos de ml5 (MediaPipe Hands) necesita WebGL.
+    // Si el navegador lo tiene deshabilitado, se avisa con un mensaje claro en
+    // vez de dejar que MediaPipe reviente con "Failed to create WebGL context".
+    if (!hayWebGL()) {
+      webglDisponible = false;
+      return;
+    }
     // ml5 v1: handPose() devuelve la instancia de inmediato; el modelo se carga
     // en background y `modelo.ready` avisa cuando terminó.
     modelo = ml5.handPose('MediaPipeHands', CONFIG.modelo);
@@ -71,8 +79,19 @@ const esquema = (p) => {
       variacionHilo[i] = 1 + (Math.random() * 0.3 - 0.15);
     }
 
-    setEstado('Cargando modelo…', 'Preparando el detector de manos…');
-    esperarModelo();
+    if (webglDisponible) {
+      setEstado('Cargando modelo…', 'Preparando el detector de manos…');
+      esperarModelo();
+    } else {
+      setEstado(
+        'WebGL deshabilitado',
+        'La detección de manos (ml5 + MediaPipe) necesita WebGL y este navegador lo tiene deshabilitado. '
+        + 'En Firefox: abrí about:config y poné webgl.force-enabled = true (o webgl.disabled = false), '
+        + 'después recargá la página. También podés abrirla en Chrome o Edge, que traen WebGL activo.',
+        true
+      );
+    }
+
     iniciarCamara();
   };
 
@@ -117,7 +136,9 @@ const esquema = (p) => {
       .catch((err) => {
         setEstado(
           'Error al cargar el modelo',
-          'No se pudo inicializar el detector de manos (' + mensajeError(err) + '). Revisá la conexión a internet y recargá la página.',
+          'No se pudo inicializar el detector de manos (' + mensajeError(err) + '). '
+          + 'Si tu navegador tiene WebGL deshabilitado, activá webgl.force-enabled en about:config '
+          + 'y recargá la página.',
           true
         );
       });
@@ -319,6 +340,24 @@ const esquema = (p) => {
 };
 
 // ------------------------------------------------------------- utilidades ---
+
+/**
+ * ¿El navegador puede crear un contexto WebGL?
+ *
+ * MediaPipe Hands (el motor de ml5 para hand pose) necesita WebGL para subir
+ * los frames a la GPU. Firefox, cuando WebGL está deshabilitado, no devuelve
+ * null sino que LANZA una DOMException ("WebGL disabled"), así que el try/catch
+ * es obligatorio: sin él, la app revienta antes de poder avisar nada.
+ */
+function hayWebGL() {
+  try {
+    const canvas = document.createElement('canvas');
+    if (!window.WebGLRenderingContext) return false;
+    return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+  } catch (err) {
+    return false;
+  }
+}
 
 function mensajeError(err) {
   if (!err) return 'error desconocido';

@@ -11,12 +11,14 @@
 
   console.log('\n[__escenario: ' + __escenario + ']');
 
-  // --- modelo ---
-  assert(global.__ml5.llamadas.length === 1, 'se creó exactamente una instancia handPose');
-  assert(global.__ml5.llamadas[0].nombre === 'MediaPipeHands', 'modelo = MediaPipeHands');
-  assert(global.__ml5.llamadas[0].opciones.runtime === 'mediapipe', 'runtime = mediapipe');
-  assert(global.__ml5.llamadas[0].opciones.maxHands === 2, 'maxHands = 2');
-  assert(global.__ml5.llamadas[0].opciones.flipHorizontal === false, 'flipHorizontal = false');
+  // --- modelo (sólo cuando el navegador tiene WebGL) ---
+  if (__escenario !== 'sin-webgl') {
+    assert(global.__ml5.llamadas.length === 1, 'se creó exactamente una instancia handPose');
+    assert(global.__ml5.llamadas[0].nombre === 'MediaPipeHands', 'modelo = MediaPipeHands');
+    assert(global.__ml5.llamadas[0].opciones.runtime === 'mediapipe', 'runtime = mediapipe');
+    assert(global.__ml5.llamadas[0].opciones.maxHands === 2, 'maxHands = 2');
+    assert(global.__ml5.llamadas[0].opciones.flipHorizontal === false, 'flipHorizontal = false');
+  }
 
   await sleep(60);
 
@@ -58,6 +60,13 @@
     p.beginShapeCalls = 0;
     p.draw();
     assert(p.beginShapeCalls === 0, 'pasada la gracia, la cuerda se elimina');
+  }
+
+  if (__escenario === 'sin-webgl') {
+    assert(global.__ml5.llamadas.length === 0, 'sin WebGL no se crea el modelo (no hay error de MediaPipe)');
+    assert(estado().indexOf('WebGL') === 0, 'mensaje de WebGL deshabilitado: "' + estado() + '"');
+    assert(__els.get('estado').classList.contains('error'), 'el overlay marca error');
+    assert(global.__ml5.detectStart === null, 'no se inició la detección');
   }
 
   if (__escenario === 'sin-permiso') {
