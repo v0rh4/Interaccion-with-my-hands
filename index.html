@@ -27,7 +27,108 @@
     #sketch { position: fixed; inset: 0; }
     #sketch canvas { display: block; }
 
-    /* Estado centrado: carga / errores */
+    /* ---------- Paneles ---------- */
+    .panel {
+      position: fixed;
+      z-index: 20;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(9, 7, 12, 0.74);
+      border: 1px solid #2a2028;
+      backdrop-filter: blur(7px);
+      -webkit-backdrop-filter: blur(7px);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      user-select: none;
+    }
+
+    /* HUD de estado (arriba a la izquierda) */
+    #info {
+      left: 14px;
+      top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 172px;
+    }
+
+    #info .fila {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      color: #9a9285;
+    }
+
+    #info .fuerte { color: #e0455a; font-variant-numeric: tabular-nums; }
+    #info .titulo {
+      color: #6d6558;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    /* Audio (arriba a la derecha) */
+    #audio {
+      right: 14px;
+      top: 12px;
+      width: 218px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+
+    #activar-sonido {
+      width: 100%;
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid #6b2033;
+      background: linear-gradient(180deg, #35121c, #1d0b12);
+      color: #ff8a9c;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    }
+
+    #activar-sonido:hover { background: linear-gradient(180deg, #471726, #260d16); }
+    #activar-sonido:focus-visible { outline: 2px solid #e0455a; outline-offset: 2px; }
+    #activar-sonido.activo {
+      border-color: #2f3d2c;
+      background: linear-gradient(180deg, #16210f, #0c1408);
+      color: #7fb069;
+      cursor: default;
+    }
+
+    #audio .fila {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: #9a9285;
+    }
+
+    #audio input[type="range"] {
+      flex: 1;
+      height: 3px;
+      accent-color: #a8324a;
+      cursor: pointer;
+    }
+
+    #audio .valor {
+      width: 30px;
+      text-align: right;
+      color: #6d6558;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #estado-audio { color: #9a9285; }
+    #estado-audio.ok { color: #7fb069; }
+    #estado-audio.warn { color: #d9a441; }
+
+    /* ---------- Estado central (carga / errores) ---------- */
     #estado {
       position: fixed;
       left: 50%;
@@ -36,13 +137,13 @@
       max-width: min(520px, 84vw);
       padding: 20px 26px;
       border-radius: 14px;
-      background: rgba(9, 7, 12, 0.88);
+      background: rgba(9, 7, 12, 0.9);
       border: 1px solid #4a1f2b;
       box-shadow: 0 0 60px rgba(150, 0, 30, 0.25);
       text-align: center;
       pointer-events: none;
       transition: opacity 0.45s ease;
-      z-index: 20;
+      z-index: 25;
     }
 
     #estado.oculto { opacity: 0; }
@@ -65,26 +166,26 @@
 
     #estado.error h1 { color: #ff6b6b; }
 
-    /* Chip de información (siempre visible) */
-    #info {
+    /* ---------- Pista inicial ---------- */
+    #pista {
       position: fixed;
-      left: 14px;
-      top: 12px;
+      left: 50%;
+      bottom: 26px;
+      transform: translateX(-50%);
       z-index: 20;
-      display: flex;
-      gap: 14px;
-      align-items: center;
-      padding: 8px 12px;
-      border-radius: 10px;
+      padding: 9px 16px;
+      border-radius: 999px;
       background: rgba(9, 7, 12, 0.72);
       border: 1px solid #2a2028;
       font-size: 12px;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.05em;
       color: #9a9285;
-      user-select: none;
+      transition: opacity 0.8s ease;
+      pointer-events: none;
+      white-space: nowrap;
     }
 
-    #info .fuerte { color: #e0455a; }
+    #pista.oculto { opacity: 0; }
 
     kbd {
       background: #191320;
@@ -100,6 +201,9 @@
   <!-- p5.js 1.11.3 (CDN) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
 
+  <!-- p5.sound.js: el addon del mismo release de p5.js (1.0.1), audio procedural -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/addons/p5.sound.min.js"></script>
+
   <!-- ml5.js v1 (CDN). handPose() con runtime: 'mediapipe' -->
   <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
 </head>
@@ -107,20 +211,48 @@
 
   <main id="sketch"></main>
 
+  <div id="info" class="panel">
+    <div class="titulo">Viuda negra</div>
+    <div class="fila"><span>manos</span><span class="fuerte" id="info-manos">0</span></div>
+    <div class="fila"><span>fps</span><span class="fuerte" id="info-fps">—</span></div>
+    <div class="fila"><span>estado</span><span class="fuerte" id="info-estado">iniciando</span></div>
+    <div class="fila"><kbd>D</kbd><span>keypoints</span></div>
+  </div>
+
+  <div id="audio" class="panel">
+    <button id="activar-sonido" type="button">Activate sound</button>
+    <div class="fila"><span>Audio</span><span id="estado-audio">Inactivo</span></div>
+    <div class="fila">
+      <label for="vol-maestro">Master</label>
+      <input type="range" id="vol-maestro" min="0" max="1" step="0.01" value="0.6" />
+      <span class="valor" id="vol-maestro-valor">60</span>
+    </div>
+    <div class="fila">
+      <label for="vol-sfx">SFX</label>
+      <input type="range" id="vol-sfx" min="0" max="1" step="0.01" value="0.8" />
+      <span class="valor" id="vol-sfx-valor">80</span>
+    </div>
+    <div class="fila">
+      <label for="vol-ambiente">Ambiente</label>
+      <input type="range" id="vol-ambiente" min="0" max="1" step="0.01" value="0.3" />
+      <span class="valor" id="vol-ambiente-valor">30</span>
+    </div>
+    <div class="fila">
+      <label for="mute"><input type="checkbox" id="mute" /> Silenciar</label>
+    </div>
+  </div>
+
   <div id="estado">
     <h1 id="estado-titulo">Viuda negra</h1>
     <p id="estado-texto">Cargando modelo…</p>
   </div>
 
-  <div id="info">
-    <span>manos: <span class="fuerte" id="info-manos">0</span></span>
-    <span><span class="fuerte" id="info-fps">—</span> fps</span>
-    <span><kbd>D</kbd> keypoints</span>
-  </div>
+  <div id="pista">Mostrá tu mano · <kbd>D</kbd> para ver los keypoints</div>
 
   <script src="hand.js"></script>
   <script src="rope.js"></script>
   <script src="spider.js"></script>
+  <script src="sound.js"></script>
   <script src="sketch.js"></script>
 </body>
 </html>

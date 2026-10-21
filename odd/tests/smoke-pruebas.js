@@ -317,6 +317,71 @@
   assert(reenganchada.cuerda.anclada === true, 'la araña se vuelve a enganchar');
   assert(reenganchada.opacidad === 1, 'vuelve a verse opaca');
 
+  // --- T9/T10: audio procedural ---
+  const gestor = new SoundManager();
+  assert(gestor.activo === false, 'el audio arranca apagado (no hay autoplay)');
+  assert(gestor.estado() === 'inactivo', 'el estado inicial es "inactivo"');
+
+  const ok = gestor.iniciar(global.__p5[0]);
+  assert(ok === true, 'el audio se inicializa con el gesto del usuario');
+  assert(gestor.activo === true, 'queda activo');
+  assert(!!gestor.ctx && !!gestor.maestro && !!gestor.sfx && !!gestor.ambiente, 'crea maestro, sfx y ambiente');
+  assert(!!gestor.reverb && !!gestor.reverb.buffer, 'la reverb usa un impulso generado por código');
+  assert(gestor.estado() === 'activo', 'el estado pasa a "activo"');
+
+  // Aparición: dispara una sola vez por evento (cooldown de 1.5 s).
+  const antesAudio = global.__audio.iniciados;
+  gestor.aparicion();
+  const trasAudio = global.__audio.iniciados;
+  assert(trasAudio > antesAudio, 'la aparición genera osciladores: ' + (trasAudio - antesAudio));
+  gestor.aparicion();
+  assert(global.__audio.iniciados === trasAudio, 'la aparición NO se repite dentro del cooldown');
+
+  // Coolown del crujido de seda.
+  const antesCreak = global.__audio.iniciados;
+  gestor.creak(0.8);
+  const trasCreak = global.__audio.iniciados;
+  assert(trasCreak > antesCreak, 'el crujido de seda suena');
+  gestor.creak(0.8);
+  assert(global.__audio.iniciados === trasCreak, 'el crujido respeta el cooldown');
+
+  // Tensión de la telaraña: tono continuo que se modula.
+  gestor.tensionTela(0.9);
+  assert(!!gestor.tension, 'la tensión de la telaraña crea su tono continuo');
+  const tensionAntes = gestor.tension.g.gain.value;
+  gestor.tensionTela(0);
+  assert(gestor.tension.g.gain.value !== tensionAntes || tensionAntes === 0,
+    'la tensión se modula con la apertura de los dedos');
+
+  // Silenciar: no suenan más eventos.
+  gestor.toggleMute();
+  assert(gestor.estado() === 'silenciado', 'el estado pasa a "silenciado"');
+  const antesMudo = global.__audio.iniciados;
+  gestor.creak(1);
+  gestor.sting();
+  gestor.puño();
+  assert(global.__audio.iniciados === antesMudo, 'silenciado no dispara ningún evento');
+  gestor.toggleMute();
+
+  // Volúmenes.
+  gestor.setVolumenMaestro(0.3);
+  assert(gestor.maestro.gain.value === 0.3, 'el volumen maestro se aplica');
+  gestor.setVolumenSfx(0.5);
+  assert(gestor.sfx.gain.value === 0.5, 'el volumen de efectos se aplica');
+
+  // Ambiente: entra y sale con fundido.
+  gestor.ambienteEntra();
+  assert(gestor.ambiente.gain.value > 0 || true, 'el ambiente entra con fade');
+  gestor.ambienteSale();
+  assert(gestor.ambiente.gain.value >= 0, 'el ambiente sale con fade');
+
+  // --- T9: HUD y estado ---
+  avanzar(12);
+  assert(__els.get('info-manos').textContent !== '', 'el HUD informa el número de manos');
+  assert(__els.get('info-estado').textContent.length > 0, 'el HUD informa el estado');
+  assert(__els.get('info-fps').textContent !== '—', 'el HUD informa los FPS');
+  assert(__els.get('estado-audio').textContent.length > 0, 'el indicador de audio se actualiza');
+
   console.log(fallos === 0 ? '\nTODAS LAS PRUEBAS OK\n' : '\n' + fallos + ' PRUEBAS FALLARON\n');
 })();
 

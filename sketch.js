@@ -38,6 +38,20 @@ const CONFIG = {
   velocidadAgitacion: 900,   // px/s a partir de la cual la araña se agita (RF-07)
   amortiguacionVelo: 0.012,   // amortiguación que se le quita al mover rápido (más oscilación)
   duracionCaida: 1.0,        // segundos de la caída con desvanecimiento (RF-08)
+  calidad: {
+    halo: true,          // halo del hilo
+    brillo: true,        // brillo especular de la araña
+    minimoFps: 30,       // por debajo de esto se baja la calidad (RNF-01)
+    ventana: 90          // frames para medir el promedio
+  },
+  audio: {
+    umbralCreak: 200,    // px/s para que un dedo enseñe la seda
+    umbralSkitter: 900,  // px/s para el pataleo rápido
+    umbralSting: 1500,   // px/s para el movimiento brusco
+    umbralBalanceo: 130, // px/s del balanceo para el whoosh
+    umbralPuño: 0.62,    // curl medio para considerar un puño
+    duracionPista: 9000  // ms que dura la pista inicial
+  },
   debug: {
     radioPunta: 11,
     radioArticulacion: 6,
@@ -53,15 +67,26 @@ const esquema = (p) => {
   let modeloListo = false;
   let videoListo = false;
   let deteccionIniciada = false;
-  let webglDisponible = true;  // si el navegador puede crear un contexto WebGL
+  let webglDisponible = true;   // si el navegador puede crear un contexto WebGL
   let mostrarDebug = false;     // tecla D
   let ultimoUpdateInfo = 0;
+  let ultimoMedidoFps = 0;
+  let calidadReducida = false;
+  let pistaOculta = false;
+  let vineta = null;
 
   const seguimiento = new Mano.Seguimiento();  // suavizado, curl y velocidad
   const colgantes = new Map();                  // clave: 'handedness-indiceDedo' → {cuerda, araña}
   const variacionHilo = [1, 1, 1, 1, 1];       // ±15 % por dedo (RF-10)
   const variacionAraña = [1, 1, 1, 1, 1];      // ±15 % por dedo (RF-10)
   const faseAraña = [0, 0, 0, 0, 0];           // fase de animación propia por dedo (RF-10)
+
+  const sonido = new SoundManager();            // audio procedural (spec §15)
+  const eventos = {                             // estado para disparar sonidos
+    manosPrevias: 0,
+    puñoAbierto: true,
+    apertura: 0
+  };
 
   p.preload = () => {
     // DECISIÓN: la detección de manos de ml5 (MediaPipe Hands) necesita WebGL.
@@ -92,6 +117,11 @@ const esquema = (p) => {
       faseAraña[i] = Math.random() * Math.PI * 2;
     }
 
+    conectarAudio();
+
+    // La pista inicial se desvanece sola si la cámara no encuentra la mano.
+    setTimeout(ocultarPista, CONFIG.audio.duracionPista);
+
     if (webglDisponible) {
       setEstado('Cargando modelo…', 'Preparando el detector de manos…');
       esperarModelo();
@@ -109,7 +139,7 @@ const esquema = (p) => {
   };
 
   p.draw = () => {
-    const dt = p.deltaTime / 1000;
+    const dt = Math.max(0.001, p.deltaTime / 1000);
     const mapa = crearMapa();
     const manos = seguimiento.actualizar(resultados, mapa, dt, {
       suavizado: CONFIG.suavizado,
@@ -118,11 +148,14 @@ const esquema = (p) => {
     });
 
     actualizarColgantes(manos, dt);
+    actualizarSonido(manos, dt);
 
     dibujarFondo(p);
+    dibujarVineta(p);
     dibujarColgantes(p);
     if (mostrarDebug) dibujarDebug(p, manos);
     actualizarInfo(p, manos);
+    medirRendimiento(p);
   };
 
   p.keyPressed = () => {
@@ -131,6 +164,7 @@ const esquema = (p) => {
 
   p.windowResized = () => {
     p.resizeCanvas(p.windowWidth, p.windowHeight);
+    vineta = null;
   };
 
   // ---------------------------------------------------------------- modelo ---
@@ -261,12 +295,18 @@ const esquema = (p) => {
         colgante.cuerda.update(CONFIG.gravedad, amortiguacion, CONFIG.iteracionesConstraint);
         colgante.cuerda.frame = p.frameCount;
 
+        // Velocidad del extremo libre: sirve para el whoosh del balanceo.
+        const fin = colgante.cuerda.endPoint();
+        if (colgante.finX === undefined) {
+          colgante.finX = fin.x;
+          colgante.finY = fin.y;
+        }
+        colgante.velocidadBalanceo = Math.hypot(fin.x - colgante.finX, fin.y - colgante.finY) / dt;
+        colgante.finX = fin.x;
+        colgante.finY = fin.y;
+
         // La araña cuelga del extremo libre y gira con el último segmento (S20).
-        colgante.araña.update(
-          colgante.cuerda.endPoint(),
-          colgante.cuerda.endAngle(),
-          punta.velocidad
-        );
+        colgante.araña.update(fin, colgante.cuerda.endAngle(), punta.velocidad);
       }
     }
 
@@ -318,7 +358,133 @@ const esquema = (p) => {
       fase: faseAraña[punta.indice],
       p: p
     });
-    return { cuerda: cuerda, araña: araña, soltada: false, opacidad: 1, caida: 0 };
+    return { cuerda: cuerda, araña: araña, soltada: false, opacidad: 1, caida: 0, velocidadBalanceo: 0 };
+  }
+
+  // ---------------------------------------------------------------- audio ---
+
+  /** Conecta los controles de la interfaz con el gestor de sonido. */
+  function conectarAudio() {
+    const boton = document.getElementById('activar-sonido');
+    if (boton) {
+      boton.addEventListener('click', () => {
+        if (sonido.activo) return;
+        if (sonido.iniciar(p)) {
+          boton.classList.add('activo');
+          boton.textContent = 'Sonido activo';
+          boton.disabled = true;
+          if (eventos.manosPrevias > 0) sonido.ambienteEntra();
+        } else {
+          setEstado('Audio no disponible', 'El navegador no dejó iniciar el audio. Probá con Chrome o Edge.', true);
+        }
+      });
+    }
+
+    const slider = (id, valorId, aplicar) => {
+      const el = document.getElementById(id);
+      const salida = document.getElementById(valorId);
+      if (!el) return;
+      const actualizar = () => {
+        const v = parseFloat(el.value);
+        if (salida) salida.textContent = String(Math.round(v * 100));
+        aplicar(v);
+      };
+      el.addEventListener('input', actualizar);
+      actualizar();
+    };
+
+    slider('vol-maestro', 'vol-maestro-valor', (v) => sonido.setVolumenMaestro(v));
+    slider('vol-sfx', 'vol-sfx-valor', (v) => sonido.setVolumenSfx(v));
+    slider('vol-ambiente', 'vol-ambiente-valor', (v) => sonido.setVolumenAmbiente(v));
+
+    const mute = document.getElementById('mute');
+    if (mute) {
+      mute.addEventListener('change', () => {
+        sonido.toggleMute();
+        if (mute.checked !== sonido.mudo) mute.checked = sonido.mudo;
+      });
+    }
+
+    // Si la pestaña suspende el audio, se intenta volver al primer plano.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) sonido.alVolverAVisible();
+    });
+  }
+
+  /**
+   * Traduce el estado de las manos en eventos de sonido (spec §15.3).
+   */
+  function actualizarSonido(manos) {
+    if (!sonido.activo) return;
+
+    // Aparición y desaparición (spec §15.2): una sola vez por evento.
+    if (manos.length > 0 && eventos.manosPrevias === 0) {
+      sonido.aparicion();
+      sonido.ambienteEntra();
+      ocultarPista();
+    } else if (manos.length === 0 && eventos.manosPrevias > 0) {
+      sonido.ambienteSale();
+    }
+    eventos.manosPrevias = manos.length;
+
+    for (const mano of manos) {
+      // Puño cerrado: disparo por flanco, no se repite mientras siga cerrado.
+      const curlMedio = mano.curl.reduce((a, b) => a + b, 0) / mano.curl.length;
+      const cerrado = curlMedio > CONFIG.audio.umbralPuño;
+      if (cerrado && eventos.puñoAbierto) sonido.puño();
+      eventos.puñoAbierto = !cerrado;
+
+      for (const punta of mano.puntas) {
+        const v = punta.velocidad;
+        if (v > CONFIG.audio.umbralCreak) {
+          sonido.creak(Math.min(1, v / 900));
+        }
+        if (v > CONFIG.audio.umbralSkitter) {
+          sonido.skitter(Math.min(1, v / 2200));
+        }
+        if (v > CONFIG.audio.umbralSting) {
+          sonido.sting();
+        }
+      }
+    }
+
+    // Tensión de la telaraña: sigue la apertura de los dedos (promediada).
+    if (manos.length > 0) {
+      let apertura = 0;
+      for (const mano of manos) apertura += calcularApertura(mano);
+      sonido.tensionTela(apertura / manos.length);
+    } else {
+      sonido.tensionTela(0);
+    }
+
+    // Balanceo de la araña: un whoosh grave.
+    for (const colgante of colgantes.values()) {
+      if (colgante.soltada) continue;
+      if (colgante.velocidadBalanceo > CONFIG.audio.umbralBalanceo) {
+        sonido.whoosh(Math.min(1, colgante.velocidadBalanceo / 600));
+      }
+    }
+  }
+
+  /**
+   * Qué tan abiertos están los dedos: 0 = puño, 1 = mano abierta.
+   * Se mide la distancia media entre puntas vecinas, dividida por el largo de
+   * la mano (muñeca → nudillo del medio), así no depende de la escala.
+   */
+  function calcularApertura(mano) {
+    const tips = mano.puntas;
+    const muneca = mano.puntos[0];
+    const nudillo = mano.puntos[9];
+    if (!muneca || !nudillo || tips.length < 2) return 0;
+
+    const referencia = Math.hypot(nudillo.x - muneca.x, nudillo.y - muneca.y) || 1;
+    let suma = 0;
+    for (let i = 1; i < tips.length; i++) {
+      suma += Math.hypot(tips[i].x - tips[i - 1].x, tips[i].y - tips[i - 1].y);
+    }
+    const medio = suma / (tips.length - 1) / referencia;
+    // Empírico: ~0.3 con el puño cerrado y ~0.8 con la mano abierta.
+    return Math.max(0, Math.min(1, (medio - 0.4) / 0.45));
   }
 
   // --------------------------------------------------------------- render ---
@@ -340,12 +506,30 @@ const esquema = (p) => {
     p2.rect(0, 0, p2.width, p2.height);
   }
 
+  /** Viñeta: oscurece los bordes para el clima de instalación (T9). */
+  function dibujarVineta(p2) {
+    if (!p2.drawingContext) return;
+    const ctx = p2.drawingContext;
+    if (!vineta || vineta.w !== p2.width || vineta.h !== p2.height) {
+      const radio = Math.min(p2.width, p2.height) * 0.34;
+      const grad = ctx.createRadialGradient(
+        p2.width / 2, p2.height / 2, radio,
+        p2.width / 2, p2.height / 2, Math.max(p2.width, p2.height) * 0.78
+      );
+      grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0.62)');
+      vineta = { w: p2.width, h: p2.height, grad: grad };
+    }
+    ctx.fillStyle = vineta.grad;
+    ctx.fillRect(0, 0, p2.width, p2.height);
+  }
+
   function dibujarColgantes(p2) {
     p2.push();
     // Primero los hilos y después las arañas, para que la araña quede encima
     // del hilo que la sostiene.
     for (const colgante of colgantes.values()) {
-      colgante.cuerda.dibujar(p2, null, colgante.opacidad);
+      colgante.cuerda.dibujar(p2, null, colgante.opacidad, CONFIG.calidad.halo);
     }
     for (const colgante of colgantes.values()) {
       colgante.araña.draw(p2);
@@ -406,6 +590,33 @@ const esquema = (p) => {
     ultimoUpdateInfo = p2.frameCount;
     document.getElementById('info-manos').textContent = String(manos.length);
     document.getElementById('info-fps').textContent = String(Math.round(p2.frameRate()));
+    document.getElementById('info-estado').textContent = estadoTexto(manos.length);
+  }
+
+  function estadoTexto(cantidad) {
+    if (!webglDisponible) return 'sin webgl';
+    if (!modeloListo) return 'cargando';
+    if (cantidad === 0) return 'buscando mano';
+    return cantidad === 1 ? '1 mano' : cantidad + ' manos';
+  }
+
+  /**
+   * Si el promedio de FPS es bajo, se baja la calidad una sola vez (T9):
+   * sin halo en el hilo y sin brillo especular.
+   */
+  function medirRendimiento(p2) {
+    if (calidadReducida) return;
+    if (p2.frameCount - ultimoMedidoFps < CONFIG.calidad.ventana) return;
+    ultimoMedidoFps = p2.frameCount;
+
+    if (p2.frameRate() < CONFIG.calidad.minimoFps && p2.frameCount > 180) {
+      calidadReducida = true;
+      CONFIG.calidad.halo = false;
+      CONFIG.calidad.brillo = false;
+      Rope.haloActivado = false;
+      Spider.brilloActivado = false;
+      document.getElementById('info-estado').textContent = 'calidad reducida';
+    }
   }
 
   // ----------------------------------------------------------------- DOM ---
@@ -419,6 +630,12 @@ const esquema = (p) => {
 
   function ocultarEstado() {
     document.getElementById('estado').classList.add('oculto');
+  }
+
+  function ocultarPista() {
+    if (pistaOculta) return;
+    pistaOculta = true;
+    document.getElementById('pista').classList.add('oculto');
   }
 };
 

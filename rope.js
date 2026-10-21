@@ -10,6 +10,9 @@
  */
 
 class Rope {
+  /** Halo del hilo: se puede apagar si el rendimiento no alcanza (T9). */
+  static haloActivado = true;
+
   /**
    * @param {number} x          posición inicial del ancla
    * @param {number} y          posición inicial del ancla
@@ -150,18 +153,22 @@ class Rope {
    * @param {p5} p instancia de p5
    * @param {object} color tono del hilo
    * @param {number} opacidad 0..1 (para el desvanecimiento de T8)
+   * @param {boolean} halo dibujar el halo (se puede apagar si baja el FPS)
    */
-  dibujar(p, color, opacidad) {
+  dibujar(p, color, opacidad, halo) {
     const tono = color || { r: 226, g: 220, b: 205 };
     const a = opacidad === undefined ? 1 : Math.max(0, Math.min(1, opacidad));
+    const conHalo = halo === undefined ? Rope.haloActivado : halo;
 
     p.noFill();
     p.strokeCap(p.ROUND);
 
     // Halo: da el brillo de la seda.
-    p.stroke(tono.r, tono.g, tono.b, 26 * a);
-    p.strokeWeight(3.2);
-    this.trazar(p);
+    if (conHalo) {
+      p.stroke(tono.r, tono.g, tono.b, 26 * a);
+      p.strokeWeight(3.2);
+      this.trazar(p);
+    }
 
     // Hilo principal.
     p.stroke(tono.r, tono.g, tono.b, 120 * a);

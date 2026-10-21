@@ -28,12 +28,19 @@ class FakeClassList {
 const els = new Map();
 global.__els = els;
 function el(id) {
-  if (!els.has(id)) els.set(id, { id, textContent: '', classList: new FakeClassList(), style: {} });
+  if (!els.has(id)) {
+    els.set(id, {
+      id, textContent: '', disabled: false, value: '0.6',
+      classList: new FakeClassList(), style: {},
+      addEventListener() {}
+    });
+  }
   return els.get(id);
 }
 
 global.document = {
   getElementById: el,
+  addEventListener() {},
   createElement: (tag) => ({
     style: {},
     setAttribute() {},
@@ -55,6 +62,60 @@ global.document = {
 global.window = global;
 global.WebGLRenderingContext = function () {};
 
+// ------------------------------------------- stub de la Web Audio API
+function paramFalso(valor) {
+  return {
+    value: valor === undefined ? 0 : valor,
+    setValueAtTime() { return this; },
+    linearRampToValueAtTime() { return this; },
+    exponentialRampToValueAtTime() { return this; },
+    setTargetAtTime(valor) { this.value = valor; return this; },
+    cancelScheduledValues() { return this; }
+  };
+}
+
+function nodoFalso(ctx, tipo) {
+  return {
+    tipo: tipo,
+    gain: paramFalso(1),
+    frequency: paramFalso(0),
+    detune: paramFalso(0),
+    Q: paramFalso(1),
+    buffer: null,
+    loop: false,
+    onended: null,
+    connect(dest) { ctx.conexiones.push(tipo); return dest; },
+    disconnect() {},
+    start() { ctx.iniciados++; },
+    stop() { ctx.parados++; }
+  };
+}
+
+function contextoFalso() {
+  const ctx = {
+    state: 'running',
+    currentTime: 0,
+    sampleRate: 44100,
+    destino: {},
+    conexiones: [],
+    iniciados: 0,
+    parados: 0,
+    resume() { ctx.state = 'running'; return Promise.resolve(); },
+    createGain: () => nodoFalso(ctx, 'gain'),
+    createOscillator: () => nodoFalso(ctx, 'osc'),
+    createBiquadFilter: () => nodoFalso(ctx, 'filter'),
+    createBufferSource: () => nodoFalso(ctx, 'buffer'),
+    createConvolver: () => nodoFalso(ctx, 'convolver'),
+    createBuffer: (canales, largo) => ({
+      length: largo,
+      getChannelData: () => new Float32Array(largo)
+    })
+  };
+  return ctx;
+}
+
+global.__audio = contextoFalso();
+
 // ---------------------------------------------------------------- stub p5
 global.__p5 = [];
 class P5Stub {
@@ -64,10 +125,12 @@ class P5Stub {
     this.deltaTime = 16;           // ms por frame (p5 lo calcula real)
     this.draws = 0;
     this.drawingContext = {
-      save() {}, restore() {}, beginPath() {}, ellipse() {}, fill() {},
+      save() {}, restore() {}, beginPath() {}, ellipse() {}, fill() {}, fillRect() {},
       fillStyle: '',
       createRadialGradient: () => ({ addColorStop() {} })
     };
+    // p5.sound expone el AudioContext y la salida por acá.
+    this.soundOut = { audiocontext: global.__audio, output: nodoFalso(global.__audio, 'out') };
     global.__p5.push(this);
     sketch(this);
     if (this.preload) this.preload();
@@ -151,7 +214,8 @@ Object.defineProperty(globalThis, 'navigator', { value: {
 const hand = fs.readFileSync(path.join(RAIZ, 'hand.js'), 'utf8');
 const rope = fs.readFileSync(path.join(RAIZ, 'rope.js'), 'utf8');
 const spider = fs.readFileSync(path.join(RAIZ, 'spider.js'), 'utf8');
+const sound = fs.readFileSync(path.join(RAIZ, 'sound.js'), 'utf8');
 const sketch = fs.readFileSync(path.join(RAIZ, 'sketch.js'), 'utf8');
 const pruebas = fs.readFileSync(path.join(__dirname, 'smoke-pruebas.js'), 'utf8');
 
-vm.runInThisContext(hand + '\n' + rope + '\n' + spider + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });
+vm.runInThisContext(hand + '\n' + rope + '\n' + spider + '\n' + sound + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });

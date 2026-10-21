@@ -30,6 +30,9 @@ const ANCLAJE_PATAS = [
 const VELOCIDAD_AGITACION = 900;
 
 class Spider {
+  /** Brillo especular: se puede apagar si el rendimiento no alcanza (T9). */
+  static brilloActivado = true;
+
   /**
    * @param {object} opciones { tamano, fase, p } — tamaño y fase propios por
    *        dedo (RF-10) y la instancia de p5 (para el ruido Perlin).
@@ -337,7 +340,7 @@ class Spider {
 
   /** Brillo especular: degradado radial sobre el cuerpo. */
   brillo(p, x, y, radio, rot, fuerza, opacidad) {
-    if (!p.drawingContext) return;
+    if (!p.drawingContext || !Spider.brilloActivado) return;
     const a = Math.max(0, Math.min(1, opacidad === undefined ? 1 : opacidad));
     if (a < 0.02) return;
     const ctx = p.drawingContext;
