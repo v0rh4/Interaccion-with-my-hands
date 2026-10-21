@@ -77,8 +77,8 @@ Rama: `feature/black-widow-spiders` (se crea en el primer work-unit commit) · E
 
 | ID  | S# | Tarea | Ruta | Estado | Commit |
 |-----|----|-------|------|--------|--------|
-| T1  | S1-S4, S33, S5 | `index.html` con CDNs + canvas + estado | inline | hecho | (pendiente commit) |
-| T2  | S6, S25, S26, S34, S42 | Cámara en espejo + handPose + 21 keypoints debug (tecla `D`) | inline | hecho | (pendiente commit) |
+| T1  | S1-S4, S33, S5 | `index.html` con CDNs + canvas + estado | inline | hecho | 6d4d53d |
+| T2  | S6, S25, S26, S34, S42 | Cámara en espejo + handPose + 21 keypoints debug (tecla `D`) | inline | hecho | 6d4d53d |
 | T3  | S28, S35, S23 | Suavizado de puntas + curl + velocidad por dedo (`hand.js`) | inline | pendiente | — |
 | T4  | S29, S36, S7 | Clase `Rope` (Verlet) anclada a las 5 puntas | inline | pendiente | — |
 | T5  | S30, S37, S15, S16, S17, S19, S21 | Clase `Spider` estática: cuerpo, marca roja, 8 patas | inline | pendiente | — |
@@ -103,4 +103,8 @@ Ruta declarada: todo inline salvo trigger de escritura en paralelo o de backstop
 - L7 (2026-10-20, decisión): DECISIÓN: el permiso de cámara se pide primero con un `getUserMedia` de diagnóstico (para poder mostrar un mensaje claro si se deniega, RNF-05) y después se crea el `createCapture` de p5; si el diagnóstico falla, no se abre la captura.
 - L8 (2026-10-20, estructura): DECISIÓN: el CSS va embebido en `index.html` y el JS se organiza con p5 en modo instancia (`new p5(esquema)`) para no ensuciar el scope global (RNF-03); `hand.js` expone un único objeto `Mano`.
 - L9 (2026-10-20, ruido conocido): ml5@1 embebido genera en Firefox el warning "Error en el mapeo fuente: URL constructor: is not a valid URL" (WASM interno de la librería). No es un error de la app (memoria previa del mismo repo).
-- L10 (2026-10-20, T1/T2): implementados `index.html`, `sketch.js` y `hand.js`. Verificación: `node --check` OK en los tres JS; URLs de CDN verificadas 200 (p5 1.11.3, ml5@1 → 1.4.0); API de ml5 verificada contra el dist real. Falta la prueba del usuario en navegador (cámara + keypoints).
+- L10 (2026-10-20, T1/T2): implementados `index.html`, `sketch.js` y `hand.js`. Verificación: `node --check` OK en los tres JS; URLs de CDN verificadas 200 (p5 1.11.3, ml5@1 → 1.4.0, assets de MediaPipe Hands en jsdelivr); API de ml5 verificada contra el dist real. Falta la prueba del usuario en navegador (cámara + keypoints).
+- L11 (2026-10-20, T1/T2, bug corregido antes de commitear): en modo instancia de p5 `VIDEO` NO es global; `p.createCapture(VIDEO, ...)` lanzaba ReferenceError. Corregido a `p.createCapture(p.VIDEO, ...)`. El smoke test en Node lo detectó.
+- L12 (2026-10-20, T1/T2, verificación): smoke test propio en Node (stubs de p5/ml5/document/navigator, 3 escenarios) en `C:\Users\USER\AppData\Local\Temp\opencode\smoke.js` — 17 aserciones OK en los 3 escenarios: modelo creado una sola vez con `runtime: 'mediapipe'`; `detectStart` recibe el `<video>` real; chip con nº de manos y FPS; overlay oculto al arrancar; mensaje de cámara denegada; mensaje de error de modelo; extracción de los 21 keypoints con nombres de MediaPipe; fallback de `landmarks` normalizados; matemática del espejo (x=0 → borde derecho) y de la escala vertical. El harness (no la app) tenía un bug: en Node 24 `globalThis.navigator` es read-only y hay que redefinirlo con `Object.defineProperty`.
+- L13 (2026-10-20, git): el repo no tenía ningún commit y el índice guardaba el proyecto de audio heredado (spec viejo, `sound.js`, `style.css`) ya borrado del worktree. Se preservó sin perder nada: commit 6306b34 = snapshot del proyecto heredado; commit 6d4d53d = T1 + T2 (y borra `sound.js`/`style.css`, recuperables desde 6306b34). Rama: `feature/black-widow-spiders`. `.atl/` queda sin trackear (es caché del harness).
+- L14 (2026-10-20, pendiente del usuario): falta la prueba manual en navegador de T1 y T2 (cámara + 21 keypoints con la tecla D) antes de seguir con T3.
