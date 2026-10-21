@@ -79,8 +79,8 @@ Rama: `feature/black-widow-spiders` (se crea en el primer work-unit commit) · E
 |-----|----|-------|------|--------|--------|
 | T1  | S1-S4, S33, S5 | `index.html` con CDNs + canvas + estado | inline | hecho | 6d4d53d |
 | T2  | S6, S25, S26, S34, S42 | Cámara en espejo + handPose + 21 keypoints debug (tecla `D`) | inline | hecho | 6d4d53d |
-| T3  | S28, S35, S23 | Suavizado de puntas + curl + velocidad por dedo (`hand.js`) | inline | hecho | (ver Log L15) |
-| T4  | S29, S36, S7 | Clase `Rope` (Verlet) anclada a las 5 puntas | inline | hecho | (ver Log L16) |
+| T3  | S28, S35, S23 | Suavizado de puntas + curl + velocidad por dedo (`hand.js`) | inline | hecho | a3e43d7 |
+| T4  | S29, S36, S7 | Clase `Rope` (Verlet) anclada a las 5 puntas | inline | hecho | a3e43d7 |
 | T5  | S30, S37, S15, S16, S17, S19, S21 | Clase `Spider` estática: cuerpo, marca roja, 8 patas | inline | pendiente | — |
 | T6  | S38, S39, S18, S20 | Animación de patas con IK + ruido + rotación | inline | pendiente | — |
 | T7  | S10, S11, S14 | curl → longitud del hilo, velocidad → agitación | inline | pendiente | — |
@@ -114,3 +114,4 @@ Ruta declarada: todo inline salvo trigger de escritura en paralelo o de backstop
 - L18 (2026-10-20, T3/T4, bugs corregidos antes de commitear): (a) el flag `visible` de la mano se reseteaba al principio del frame, así que el suavizado se reiniciaba en cada frame y la velocidad daba siempre 0 → se reemplazó por un contador de frames (`estado.frame`) que detecta "vista en el frame anterior"; (b) el curl medido contra la muñeca daba ~0.28 para un pulgar estirado; (c) la fórmula del curl se normaliza por 0.75 (una punta pegada a la base cuenta como dedo cerrado).
 - L19 (2026-10-20, T3/T4, verificación): smoke test en `odd/tests/smoke.js` (stubs de p5/ml5/document/navigator, 3 escenarios) → 30 aserciones OK: curl ~0 con la mano estirada, curl alto con los dedos cerrados, curl intermedio 0.32; el suavizado mueve exactamente el 35 % hacia la posición nueva; la mano que reaparece lejos se reinicia; la velocidad refleja el movimiento real (3125 px/s); la cuerda cuelga bajo el ancla, respeta la longitud de cada segmento, el ángulo final apunta hacia abajo, acortar el hilo sube el extremo y la cuerda no sigue al ancla al instante (inercia). `node --check` OK en hand.js, rope.js y sketch.js. El smoke test quedó en el repo bajo `odd/tests/` (no toca los archivos de la app).
 - L20 (2026-10-20, T3/T4, pendiente del usuario): prueba manual en navegador — la seda debe colgar de las 5 puntas, seguir la mano con retardo al moverla rápido y quedar quieta cuando la mano está quieta. Con `D` se ven el % de curl (rojo) y la velocidad (celeste) de cada punta.
+- L21 (2026-10-20, T3/T4, commit): `a3e43d7` = T3 + T4 (hand.js, rope.js nuevo, sketch.js, index.html y odd/tests/). Rama `feature/black-widow-spiders`.
