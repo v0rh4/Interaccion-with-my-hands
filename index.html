@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Halloween Audio System — Black Widow</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- p5.js y p5.sound.js (mismo release, CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/addons/p5.sound.min.js"></script>
+  <!-- ml5.js (versión estable fija para evitar fallos de @latest) -->
+  <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
+</head>
+<body>
+
+  <div class="overlay">
+    <div class="controls">
+      <button id="activateSound">ACTIVATE SOUND</button>
+      <button id="retryCam" style="background:#444;">Reintentar cámara</button>
+      <div class="status">Audio: <span id="statusText" class="inactive">Inactivo</span></div>
+      <label>Mute <input type="checkbox" id="muteToggle"></label>
+      <label>Master <input type="range" id="masterVol" min="0" max="1" step="0.01" value="0.6"></label>
+      <label>SFX <input type="range" id="sfxVol" min="0" max="1" step="0.01" value="0.8"></label>
+      <label>Ambiente <input type="range" id="ambientVol" min="0" max="1" step="0.01" value="0.3"></label>
+    </div>
+  </div>
+
+  <main>
+    <canvas id="p5canvas"></canvas>
+  </main>
+
+  <script src="sound.js"></script>
+  <script src="sketch.js"></script>
+</body>
+</html>
