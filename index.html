@@ -1,35 +1,124 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Halloween Audio System — Black Widow</title>
-  <link rel="stylesheet" href="style.css">
-  <!-- p5.js y p5.sound.js (mismo release, CDN) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/p5.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/addons/p5.sound.min.js"></script>
-  <!-- ml5.js (versión estable fija para evitar fallos de @latest) -->
-  <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Viuda negra colgando de mis dedos</title>
+
+  <style>
+    :root { color-scheme: dark; }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #05060a;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: #e9e3d7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Contenedor del canvas de p5 */
+    #sketch { position: fixed; inset: 0; }
+    #sketch canvas { display: block; }
+
+    /* Estado centrado: carga / errores */
+    #estado {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      max-width: min(520px, 84vw);
+      padding: 20px 26px;
+      border-radius: 14px;
+      background: rgba(9, 7, 12, 0.88);
+      border: 1px solid #4a1f2b;
+      box-shadow: 0 0 60px rgba(150, 0, 30, 0.25);
+      text-align: center;
+      pointer-events: none;
+      transition: opacity 0.45s ease;
+      z-index: 20;
+    }
+
+    #estado.oculto { opacity: 0; }
+
+    #estado h1 {
+      margin: 0 0 10px;
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #e0455a;
+    }
+
+    #estado p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #bdb5a6;
+    }
+
+    #estado.error h1 { color: #ff6b6b; }
+
+    /* Chip de información (siempre visible) */
+    #info {
+      position: fixed;
+      left: 14px;
+      top: 12px;
+      z-index: 20;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: rgba(9, 7, 12, 0.72);
+      border: 1px solid #2a2028;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      color: #9a9285;
+      user-select: none;
+    }
+
+    #info .fuerte { color: #e0455a; }
+
+    kbd {
+      background: #191320;
+      border: 1px solid #3a2029;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: inherit;
+      font-size: 11px;
+      color: #d8cfc0;
+    }
+  </style>
+
+  <!-- p5.js 1.11.3 (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+
+  <!-- ml5.js v1 (CDN). handPose() con runtime: 'mediapipe' -->
+  <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
 </head>
 <body>
 
-  <div class="overlay">
-    <div class="controls">
-      <button id="activateSound">ACTIVATE SOUND</button>
-      <button id="retryCam" style="background:#444;">Reintentar cámara</button>
-      <div class="status">Audio: <span id="statusText" class="inactive">Inactivo</span></div>
-      <label>Mute <input type="checkbox" id="muteToggle"></label>
-      <label>Master <input type="range" id="masterVol" min="0" max="1" step="0.01" value="0.6"></label>
-      <label>SFX <input type="range" id="sfxVol" min="0" max="1" step="0.01" value="0.8"></label>
-      <label>Ambiente <input type="range" id="ambientVol" min="0" max="1" step="0.01" value="0.3"></label>
-    </div>
+  <main id="sketch"></main>
+
+  <div id="estado">
+    <h1 id="estado-titulo">Viuda negra</h1>
+    <p id="estado-texto">Cargando modelo…</p>
   </div>
 
-  <main>
-    <canvas id="p5canvas"></canvas>
-  </main>
+  <div id="info">
+    <span>manos: <span class="fuerte" id="info-manos">0</span></span>
+    <span><span class="fuerte" id="info-fps">—</span> fps</span>
+    <span><kbd>D</kbd> keypoints</span>
+  </div>
 
-  <script src="sound.js"></script>
+  <script src="hand.js"></script>
   <script src="sketch.js"></script>
 </body>
 </html>
