@@ -9,6 +9,12 @@
   };
   const estado = () => __els.get('estado-titulo').textContent;
 
+  // Mano sintética: 21 keypoints en píxeles del video (640x480)
+  const keypoints = [];
+  for (let i = 0; i < 21; i++) {
+    keypoints.push({ x: 100 + i * 20, y: 200 + i * 10, score: 0.99, name: Mano.NOMBRES[i] });
+  }
+
   console.log('\n[__escenario: ' + __escenario + ']');
 
   // --- modelo (sólo cuando el navegador tiene WebGL) ---
@@ -28,10 +34,6 @@
       'detectStart recibió el <video> real (media.elt)');
 
     // Mano sintética: 21 keypoints en píxeles del video (640x480)
-    const keypoints = [];
-    for (let i = 0; i < 21; i++) {
-      keypoints.push({ x: 100 + i * 20, y: 200 + i * 10, score: 0.99, name: Mano.NOMBRES[i] });
-    }
     global.__ml5.detectStart.cb([{ keypoints, handedness: 'Right', confidence: 0.95 }]);
 
     p.key = 'd';
@@ -45,21 +47,21 @@
     assert(__els.get('estado').classList.contains('oculto'), 'el overlay de estado se oculta al arrancar');
 
     // --- T4: una cuerda por punta y sin parpadeo si la detección pierde un frame ---
-    // Cada cuerda se dibuja en 2 trazos (halo + hilo) → 2 beginShape por cuerda.
-    p.beginShapeCalls = 0;
+    // Cada cuerda se dibuja en 2 trazos (halo + hilo) → 2 endShape abiertos por cuerda.
+    p.hiloCalls = 0;
     p.draw();
-    assert(p.beginShapeCalls === 10, 'se dibuja una cuerda por punta (5 cuerdas x 2 trazos): ' + p.beginShapeCalls);
+    assert(p.hiloCalls === 10, 'se dibuja una cuerda por punta (5 cuerdas x 2 trazos): ' + p.hiloCalls);
 
     global.__ml5.detectStart.cb([]);            // la mano desaparece
     p.frameCount += 5;
-    p.beginShapeCalls = 0;
+    p.hiloCalls = 0;
     p.draw();
-    assert(p.beginShapeCalls === 10, 'la cuerda se conserva durante la gracia (no parpadea)');
+    assert(p.hiloCalls === 10, 'la cuerda se conserva durante la gracia (no parpadea)');
 
     p.frameCount += 40;
-    p.beginShapeCalls = 0;
+    p.hiloCalls = 0;
     p.draw();
-    assert(p.beginShapeCalls === 0, 'pasada la gracia, la cuerda se elimina');
+    assert(p.hiloCalls === 0, 'pasada la gracia, la cuerda se elimina');
   }
 
   if (__escenario === 'sin-webgl') {
@@ -172,6 +174,62 @@
   assert(cuerda2.endPoint().x < 700 - 5,
     'la cuerda no sigue al ancla al instante: hay inercia (RF-05)');
   assert(Math.abs(quieta.x - 400) < 3, 'una cuerda quieta queda vertical');
+
+  // --- T5/T6: la araña (cuerpo, marca roja, 8 patas con IK) ---
+  const araña = new Spider({ tamano: 1, fase: 0.5, p: global.__p5[0] });
+  assert(araña.patas.length === 8, 'la araña tiene 8 patas');
+  assert(araña.patas.filter((x) => x.lado === 1).length === 4
+    && araña.patas.filter((x) => x.lado === -1).length === 4,
+    'las 8 patas se reparten 4 y 4 a cada lado del cuerpo');
+
+  araña.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+  assert(araña.x === 400 && araña.y === 300, 'la araña cuelga del extremo libre de la cuerda');
+  assert(Math.abs(araña.rotacion - (Math.PI / 2 + Math.PI)) < 1e-9,
+    'la cabeza mira hacia el hilo (ángulo de la cuerda + PI)');
+
+  const patasOk = araña.patas.every((pt) => Number.isFinite(pt.pie.x) && Number.isFinite(pt.pie.y)
+    && Number.isFinite(pt.rodilla.x) && Number.isFinite(pt.rodilla.y));
+  assert(patasOk, 'las 8 patas tienen posiciones válidas (sin NaN)');
+
+  const femur = Math.hypot(
+    araña.patas[0].rodilla.x - araña.patas[0].hueso.x,
+    araña.patas[0].rodilla.y - araña.patas[0].hueso.y);
+  assert(Math.abs(femur - araña.lFemur) < 0.6, 'el fémur conserva su largo (IK correcta): ' + femur.toFixed(2));
+  const tibia = Math.hypot(
+    araña.patas[0].pie.x - araña.patas[0].rodilla.x,
+    araña.patas[0].pie.y - araña.patas[0].rodilla.y);
+  assert(Math.abs(tibia - araña.lTibia) < 0.6, 'la tibia conserva su largo (IK correcta): ' + tibia.toFixed(2));
+
+  const antes = araña.patas.map((pt) => pt.pie.x);
+  for (let i = 0; i < 30; i++) araña.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+  const despues = araña.patas.map((pt) => pt.pie.x);
+  const deltas = antes.map((v, i) => Math.abs(v - despues[i]));
+  assert(Math.max.apply(null, deltas) > 0.5, 'las patas se mueven con el ciclo de pataleo');
+  assert(Math.max.apply(null, deltas) - Math.min.apply(null, deltas) > 0.4,
+    'las patas NO se mueven todas igual (ciclo asimétrico, no mecánico)');
+
+  araña.update({ x: 400, y: 300 }, 0, 0);
+  assert(Math.abs(araña.rotacion - Math.PI) < 1e-9, 'la araña rota según el ángulo de la cuerda (S20)');
+
+  // El vuelco: la araña se torsiona y el rojo del vientre aparece y desaparece.
+  const vuelco0 = araña.vuelco;
+  for (let i = 0; i < 120; i++) araña.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+  assert(araña.vuelco !== vuelco0, 'la araña se torsiona mientras cuelga');
+  const visibilidades = [];
+  for (let i = 0; i < 240; i++) {
+    araña.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+    visibilidades.push(Math.abs(Math.sin(araña.vuelco)));
+  }
+  assert(Math.max.apply(null, visibilidades) > 0.7, 'el vientre llega a verse (marca roja)');
+  assert(Math.min.apply(null, visibilidades) < 0.4, 'el vientre también se oculta a ratos');
+
+  // --- T5/T6: una araña por cuerda en el sketch ---
+  global.__ml5.detectStart.cb([{ keypoints, handedness: 'Right', confidence: 0.95 }]);
+  p.ellipseCalls = 0;
+  p.hiloCalls = 0;
+  p.draw();
+  assert(p.ellipseCalls === 10, 'se dibuja una araña por cuerda (5 arañas × 2 elipses): ' + p.ellipseCalls);
+  assert(p.hiloCalls === 10, 'y una cuerda por araña: ' + p.hiloCalls);
 
   console.log(fallos === 0 ? '\nTODAS LAS PRUEBAS OK\n' : '\n' + fallos + ' PRUEBAS FALLARON\n');
 })();

@@ -33,6 +33,7 @@ const CONFIG = {
   longitudHilo: 150,        // longitud base del hilo en píxeles
   iteracionesConstraint: 10, // vueltas del solver de constraints (cuerda firme)
   graciaCuerda: 30,          // frames que se conserva la cuerda si la mano se pierde (evita parpadeo)
+  tamanoAraña: 1.0,          // escala base de la araña (con variación ±15 % por dedo)
   debug: {
     radioPunta: 11,
     radioArticulacion: 6,
@@ -53,8 +54,10 @@ const esquema = (p) => {
   let ultimoUpdateInfo = 0;
 
   const seguimiento = new Mano.Seguimiento();  // suavizado, curl y velocidad
-  const cuerdas = new Map();                    // clave: 'handedness-indiceDedo'
+  const colgantes = new Map();                  // clave: 'handedness-indiceDedo' → {cuerda, araña}
   const variacionHilo = [1, 1, 1, 1, 1];       // ±15 % por dedo (RF-10)
+  const variacionAraña = [1, 1, 1, 1, 1];      // ±15 % por dedo (RF-10)
+  const faseAraña = [0, 0, 0, 0, 0];           // fase de animación propia por dedo (RF-10)
 
   p.preload = () => {
     // DECISIÓN: la detección de manos de ml5 (MediaPipe Hands) necesita WebGL.
@@ -74,9 +77,11 @@ const esquema = (p) => {
     p.pixelDensity(1); // menos fill-rate = más FPS (RNF-01)
     p.frameRate(60);
 
-    // Cada dedo con su propio largo de hilo (RF-10).
+    // Cada dedo con su propio largo de hilo, tamaño y fase (RF-10).
     for (let i = 0; i < variacionHilo.length; i++) {
       variacionHilo[i] = 1 + (Math.random() * 0.3 - 0.15);
+      variacionAraña[i] = 1 + (Math.random() * 0.3 - 0.15);
+      faseAraña[i] = Math.random() * Math.PI * 2;
     }
 
     if (webglDisponible) {
@@ -104,10 +109,10 @@ const esquema = (p) => {
       saltoMaximo: CONFIG.saltoMaximo
     });
 
-    actualizarCuerdas(manos);
+    actualizarColgantes(manos);
 
     dibujarFondo(p);
-    dibujarCuerdas(p);
+    dibujarColgantes(p);
     if (mostrarDebug) dibujarDebug(p, manos);
     actualizarInfo(p, manos);
   };
@@ -206,10 +211,10 @@ const esquema = (p) => {
   }
 
   /**
-   * Ancla una cuerda por punta de dedo y las actualiza.
-   * Clave: 'handedness-indiceDedo' (spec.md §8).
+   * Ancla una cuerda por punta de dedo, crea la araña que cuelga de ella y
+   * actualiza ambas. Clave: 'handedness-indiceDedo' (spec.md §8).
    */
-  function actualizarCuerdas(manos) {
+  function actualizarColgantes(manos) {
     const activas = new Set();
 
     for (const mano of manos) {
@@ -217,29 +222,42 @@ const esquema = (p) => {
         const clave = mano.handedness + '-' + punta.indice;
         activas.add(clave);
 
-        let cuerda = cuerdas.get(clave);
-        if (!cuerda) {
-          cuerda = new Rope(
+        let colgante = colgantes.get(clave);
+        if (!colgante) {
+          const cuerda = new Rope(
             punta.x,
             punta.y,
             CONFIG.longitudHilo * variacionHilo[punta.indice],
             CONFIG.segmentos
           );
-          cuerdas.set(clave, cuerda);
+          const araña = new Spider({
+            tamano: CONFIG.tamanoAraña * variacionAraña[punta.indice],
+            fase: faseAraña[punta.indice],
+            p: p
+          });
+          colgante = { cuerda: cuerda, araña: araña };
+          colgantes.set(clave, colgante);
         }
 
-        cuerda.pin(punta.x, punta.y);
-        cuerda.update(CONFIG.gravedad, CONFIG.amortiguacion, CONFIG.iteracionesConstraint);
-        cuerda.frame = p.frameCount;
+        colgante.cuerda.pin(punta.x, punta.y);
+        colgante.cuerda.update(CONFIG.gravedad, CONFIG.amortiguacion, CONFIG.iteracionesConstraint);
+        colgante.cuerda.frame = p.frameCount;
+
+        // La araña cuelga del extremo libre y gira con el último segmento (S20).
+        colgante.araña.update(
+          colgante.cuerda.endPoint(),
+          colgante.cuerda.endAngle(),
+          punta.velocidad
+        );
       }
     }
 
     // Las cuerdas de manos que ya no están se conservan un rato: si la
     // detección pierde un frame, el hilo no debe parpadear. Después se borran
     // (la caída con gravedad de T8 entra más adelante).
-    for (const [clave, cuerda] of cuerdas) {
+    for (const [clave, colgante] of colgantes) {
       if (activas.has(clave)) continue;
-      if (p.frameCount - cuerda.frame > CONFIG.graciaCuerda) cuerdas.delete(clave);
+      if (p.frameCount - colgante.cuerda.frame > CONFIG.graciaCuerda) colgantes.delete(clave);
     }
   }
 
@@ -262,10 +280,15 @@ const esquema = (p) => {
     p2.rect(0, 0, p2.width, p2.height);
   }
 
-  function dibujarCuerdas(p2) {
+  function dibujarColgantes(p2) {
     p2.push();
-    for (const cuerda of cuerdas.values()) {
-      cuerda.dibujar(p2);
+    // Primero los hilos y después las arañas, para que la araña quede encima
+    // del hilo que la sostiene.
+    for (const colgante of colgantes.values()) {
+      colgante.cuerda.dibujar(p2);
+    }
+    for (const colgante of colgantes.values()) {
+      colgante.araña.draw(p2);
     }
     p2.pop();
   }

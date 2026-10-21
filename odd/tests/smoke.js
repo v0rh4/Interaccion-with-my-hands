@@ -61,6 +61,11 @@ class P5Stub {
   constructor(sketch) {
     this.width = 800; this.height = 600; this.frameCount = 0; this.key = '';
     this.draws = 0;
+    this.drawingContext = {
+      save() {}, restore() {}, beginPath() {}, ellipse() {}, fill() {},
+      fillStyle: '',
+      createRadialGradient: () => ({ addColorStop() {} })
+    };
     global.__p5.push(this);
     sketch(this);
     if (this.preload) this.preload();
@@ -70,7 +75,17 @@ class P5Stub {
   pixelDensity() {} frameRate() {} background() {} push() {} pop() {}
   translate() {} scale() {} image() {} rect() {} fill() {} noStroke() {}
   stroke() {} strokeWeight() {} circle() {} line() {} noFill() {}
-  beginShape() { this.beginShapeCalls = (this.beginShapeCalls || 0) + 1; } vertex() {} endShape() {} strokeCap() {}
+  beginShape() { this.beginShapeCalls = (this.beginShapeCalls || 0) + 1; } vertex() {} endShape(modo) {
+    // endShape() sin argumento = trazo abierto: sólo lo usan las cuerdas.
+    if (modo === undefined) this.hiloCalls = (this.hiloCalls || 0) + 1;
+  } strokeCap() {} strokeJoin() {}
+  rotate() {}
+  ellipse() { this.ellipseCalls = (this.ellipseCalls || 0) + 1; }
+  noise(a, b) {
+    // Ruido de valor determinista (el smoke test no necesita Perlin real).
+    const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453;
+    return v - Math.floor(v);
+  }
   textSize() {} textAlign() {} text() {}
   color(r, g, b, a) { return { r, g, b, a }; }
   createCapture(type, opciones) {
@@ -95,6 +110,7 @@ P5Stub.prototype.VIDEO = 'video';
 P5Stub.prototype.LEFT = 'left';
 P5Stub.prototype.BOTTOM = 'bottom';
 P5Stub.prototype.ROUND = 'round';
+P5Stub.prototype.CLOSE = 'close';
 P5Stub.prototype.AUDIO = 'audio';
 global.p5 = P5Stub;
 
@@ -132,7 +148,8 @@ Object.defineProperty(globalThis, 'navigator', { value: {
 // ------------------------------------------------------------------ código
 const hand = fs.readFileSync(path.join(RAIZ, 'hand.js'), 'utf8');
 const rope = fs.readFileSync(path.join(RAIZ, 'rope.js'), 'utf8');
+const spider = fs.readFileSync(path.join(RAIZ, 'spider.js'), 'utf8');
 const sketch = fs.readFileSync(path.join(RAIZ, 'sketch.js'), 'utf8');
 const pruebas = fs.readFileSync(path.join(__dirname, 'smoke-pruebas.js'), 'utf8');
 
-vm.runInThisContext(hand + '\n' + rope + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });
+vm.runInThisContext(hand + '\n' + rope + '\n' + spider + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });
