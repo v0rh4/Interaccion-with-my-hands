@@ -49,7 +49,10 @@ const CONFIG = {
     umbralExtendido: 0.42,   // curl por debajo de esto = dedo estirado
     umbralDoblado: 0.58,     // curl por encima de esto = dedo doblado
     umbralPellizco: 0.42,    // distancia pulgar-índice / tamaño de la mano
-    framesEstables: 2        // frames para confirmar un gesto (evita parpadeo)
+    framesEstables: 2,       // frames para confirmar un gesto (evita parpadeo)
+    // Fase 2 · Bloque 2: qué pasa cuando la mano hace puño.
+    factorPuno: 0.75,        // cuánto se repliega el hilo con el puño
+    velocidadPuno: 6         // velocidad de la transición de la defensa (1/s)
   },
   audio: {
     umbralCreak: 200,    // px/s para que un dedo enseñe la seda
@@ -85,6 +88,7 @@ const esquema = (p) => {
   const seguimiento = new Mano.Seguimiento();  // suavizado, curl y velocidad
   const reconocedor = new Mano.Gestos();       // gestos por mano (Fase 2)
   const colgantes = new Map();                  // clave: 'handedness-indiceDedo' → {cuerda, araña}
+  const defensaManos = new Map();               // 'handedness' → 0..1 (postura defensiva)
   const variacionHilo = [1, 1, 1, 1, 1];       // ±15 % por dedo (RF-10)
   const variacionAraña = [1, 1, 1, 1, 1];      // ±15 % por dedo (RF-10)
   const faseAraña = [0, 0, 0, 0, 0];           // fase de animación propia por dedo (RF-10)
@@ -154,8 +158,9 @@ const esquema = (p) => {
       saltoMaximo: CONFIG.saltoMaximo
     });
 
-    // Fase 2 · Bloque 1: gesto de cada mano.
+    // Fase 2: gesto de cada mano y postura defensiva (puño).
     const gestos = detectarGestos(manos);
+    actualizarDefensa(gestos, dt);
 
     actualizarColgantes(manos, dt);
     actualizarSonido(manos, gestos);
@@ -271,6 +276,29 @@ const esquema = (p) => {
     });
   }
 
+  /**
+   * Postura defensiva por mano: 0 = cuelga normal, 1 = repliegue total.
+   *
+   * La transición es exponencial e independiente de la tasa de frames, así la
+   * araña sube y baja por el hilo sin teletransportarse (Fase 2, Bloque 2).
+   */
+  function actualizarDefensa(gestos, dt) {
+    const vistos = new Set();
+    const factor = 1 - Math.exp(-CONFIG.gestos.velocidadPuno * dt);
+
+    for (const g of gestos) {
+      vistos.add(g.id);
+      const objetivo = g.gesto.id === 'puño' ? 1 : 0;
+      const actual = defensaManos.get(g.id) || 0;
+      defensaManos.set(g.id, actual + (objetivo - actual) * factor);
+    }
+
+    // La mano que desaparece pierde la defensa: si vuelve, cuelga normal.
+    for (const id of Array.from(defensaManos.keys())) {
+      if (!vistos.has(id)) defensaManos.delete(id);
+    }
+  }
+
   // --------------------------------------------------------------- cuerdas ---
 
   /** Mapa de coordenadas video→canvas para el frame actual. */
@@ -288,6 +316,9 @@ const esquema = (p) => {
     const activas = new Set();
 
     for (const mano of manos) {
+      // Postura defensiva de esta mano (Fase 2, Bloque 2): 1 = puño cerrado.
+      const defensa = defensaManos.get(mano.handedness) || 0;
+
       for (const punta of mano.puntas) {
         const clave = mano.handedness + '-' + punta.indice;
         activas.add(clave);
@@ -311,8 +342,11 @@ const esquema = (p) => {
         }
 
         // T7: el curl acorta el hilo y la araña sube; al extender, baja (RF-06).
+        // Fase 2: con el puño el hilo se repliega todavía más y la araña se
+        // acurruca contra la punta del dedo.
         const largo = CONFIG.longitudHilo * variacionHilo[punta.indice]
-          * (1 - CONFIG.factorCurl * punta.curl);
+          * (1 - CONFIG.factorCurl * punta.curl)
+          * (1 - CONFIG.gestos.factorPuno * defensa);
         colgante.cuerda.setLength(largo);
 
         // T7: al mover rápido la araña oscila más (menos amortiguación) y se agita.
@@ -334,7 +368,7 @@ const esquema = (p) => {
         colgante.finY = fin.y;
 
         // La araña cuelga del extremo libre y gira con el último segmento (S20).
-        colgante.araña.update(fin, colgante.cuerda.endAngle(), punta.velocidad);
+        colgante.araña.update(fin, colgante.cuerda.endAngle(), punta.velocidad, defensa);
       }
     }
 

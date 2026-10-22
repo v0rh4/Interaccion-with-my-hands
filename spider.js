@@ -63,6 +63,7 @@ class Spider {
     this.velocidad = 0;           // velocidad de la punta (px/s)
     this.agitacion = 0;           // 0..1.5: cuánto se agita por la velocidad
     this.opacidad = 1;            // para el desvanecimiento de T8
+    this.defensa = 0;             // 0..1: postura defensiva (Fase 2, Bloque 2)
 
     // Estado de cada pata: coxa, inicio de fémur, rodilla y pie.
     this.patas = [];
@@ -85,12 +86,17 @@ class Spider {
    * @param {{x:number,y:number}} ropeEnd  punto libre de la cuerda (donde cuelga)
    * @param {number} angle                  ángulo del último segmento de la cuerda
    * @param {number} speed                  velocidad de la punta en px/s
+   * @param {number} [defensa]              0..1: postura defensiva (Fase 2)
    */
-  update(ropeEnd, angle, speed) {
+  update(ropeEnd, angle, speed, defensa) {
     this.tiempo += 1 / 60;
     this.x = ropeEnd.x;
     this.y = ropeEnd.y;
     this.velocidad = speed || 0;
+
+    // Postura defensiva: con el puño cerrado las patas se recogen contra el
+    // cuerpo y el pataleo se calma (Fase 2, Bloque 2).
+    this.defensa = Math.max(0, Math.min(1, defensa || 0));
 
     // La cabeza mira hacia el hilo: el ángulo de la cuerda apunta hacia abajo,
     // así que hacia el ancla va el ángulo + PI (spec.md §6, S20).
@@ -135,9 +141,13 @@ class Spider {
 
       // --- Ciclo colgante: pataleo global + fase propia + ruido asimétrico ---
       // Con la mano rápido, el ciclo se acelera y se agita más (RF-07).
+      // En defensa el ciclo se frena y se achica: la araña se acurruca.
       const agit = this.agitacion;
-      const ciclo = this.tiempo * (2.1 + agit * 3.5) + pata.fase;
-      const pataleo = Math.sin(this.tiempo * (0.85 + agit * 1.6) + this.fase);
+      const defensa = this.defensa;
+      const calma = 1 - 0.8 * defensa;
+      const ciclo = this.tiempo * (2.1 + agit * 3.5) * calma + pata.fase;
+      const pataleo = Math.sin(this.tiempo * (0.85 + agit * 1.6) * calma + this.fase)
+        * (1 - 0.85 * defensa);
       const ruidoPata = this.ruido(pata.indice * 7.3 + (pata.lado > 0 ? 0 : 31.7), this.tiempo * 0.5);
 
       let alcance = alcanceMax * (
@@ -147,10 +157,12 @@ class Spider {
         + 0.14 * (ruidoPata - 0.5)
       );
       alcance = Math.max(alcanceMax * 0.35, Math.min(alcanceMax * 0.98, alcance));
+      // Las patas se recogen contra el cuerpo (postura defensiva).
+      alcance *= (1 - 0.45 * defensa);
 
       // Dirección de la pata en el mundo (el lado -y espeja el ángulo).
       const angMundo = rot + angLocal * pata.lado;
-      const desvio = (ruidoPata - 0.5) * (0.25 + 0.35 * agit);
+      const desvio = (ruidoPata - 0.5) * (0.25 + 0.35 * agit) * (1 - 0.7 * defensa);
       const dirX = Math.cos(angMundo + desvio);
       const dirY = Math.sin(angMundo + desvio);
 

@@ -50,6 +50,35 @@ Al abrirlo, el navegador pide permiso de cámara: **aceptalo**.
 El sonido **no arranca solo**: el navegador exige un gesto del usuario antes de
 dejar sonar nada. El botón lo activa una sola vez y después alcanza.
 
+## Gestos y el puño
+
+El reconocedor mira el **curl** de cada dedo (ya se calculaba para el largo del
+hilo) y la distancia entre las puntas del pulgar y del índice, normalizada por
+el tamaño de la mano. No depende de la escala de la imagen ni de cómo gires la
+mano.
+
+| Gesto | Cómo se reconoce | Qué pasa |
+|---|---|---|
+| Mano abierta | los cuatro dedos largos estirados | las arañas cuelgan largo |
+| Puño | los cuatro dedos largos doblados | las arañas se repliegan y suben por el hilo |
+| Pellizco | las puntas del pulgar y del índice se tocan, con el índice apenas doblado | la seda se tensa y cruje |
+| Índice | sólo el índice queda estirado | pataleo |
+| Paz | índice y medio estirados | pataleo |
+
+Un gesto se confirma recién después de **2 frames seguidos**, así el HUD no
+parpadea entre dos gestos mientras te movés. El nombre del gesto se ve en el
+HUD (arriba a la izquierda) y, con la tecla `D`, junto a la muñeca.
+
+### Qué hace el puño
+
+Al cerrar el puño, las arañas de esa mano **se repliegan**: el hilo se acorta
+(la araña sube casi hasta la punta del dedo) y las patas se recogen contra el
+cuerpo, con el pataleo calmado. Al abrir la mano, la defensa se deshace: el
+hilo se alarga y las arañas vuelven a bajar y a balancearse.
+
+El repliegue es gradual (no hay teletransporte) y el hilo sigue siendo física
+Verlet, así que las arañas viajan por el hilo y siguen oscilando.
+
 ## Qué suena
 
 Todo se genera en tiempo real con la Web Audio API de p5.sound.js:
@@ -89,8 +118,11 @@ está en `odd/tasks/black-widow-spiders.md`.
 
 Los parámetros están en el objeto `CONFIG` al inicio de `sketch.js`: gravedad,
 amortiguación, cantidad de segmentos, largo del hilo, tamaño de la araña,
-suavizado, cuánto se acorta el hilo al doblar un dedo y los umbrales de los
-sonidos. El tamaño y los largos de las patas están en `spider.js`.
+suavizado, cuánto se acorta el hilo al doblar un dedo, los umbrales de los
+sonidos y los del reconocedor de gestos (`CONFIG.gestos`: qué curl cuenta como
+dedo estirado, cuándo es un pellizco, cuántos frames tarda en confirmar un
+gesto, cuánto se repliega el hilo con el puño y con qué rapidez). El tamaño y
+los largos de las patas están en `spider.js`.
 
 ## Tests
 

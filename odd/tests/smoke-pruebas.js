@@ -382,6 +382,63 @@
   assert(reenganchada.cuerda.anclada === true, 'la araña se vuelve a enganchar');
   assert(reenganchada.opacidad === 1, 'vuelve a verse opaca');
 
+  // --- Fase 2 · Bloque 2: el puño repliega a las arañas y al abrir vuelven ---
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(50);
+  const colgada = p.colgantes.get('Right-0');
+  const largoColgada = colgada.cuerda.longitud;
+  assert(colgada.araña.defensa < 0.05,
+    'con la mano abierta la araña cuelga normal (defensa ' + colgada.araña.defensa.toFixed(2) + ')');
+  assert(__els.get('info-gesto').textContent === 'Mano abierta',
+    'el HUD informa el gesto: "' + __els.get('info-gesto').textContent + '"');
+
+  global.__ml5.detectStart.cb([manoAppCerrada]);
+  avanzar(60);
+  const enPuno = p.colgantes.get('Right-0');
+  assert(enPuno.araña.defensa > 0.9,
+    'con el puño la araña se repliega (defensa ' + enPuno.araña.defensa.toFixed(2) + ')');
+  assert(Number.isFinite(enPuno.araña.x) && Number.isFinite(enPuno.araña.y),
+    'con el puño la araña sigue en una posición válida');
+  assert(Number.isFinite(enPuno.cuerda.endAngle()),
+    'el ángulo de la cuerda sigue siendo válido con el hilo replegado');
+  assert(enPuno.cuerda.longitud < largoColgada * 0.4,
+    'el hilo se repliega con el puño: ' + Math.round(largoColgada) + ' → '
+    + Math.round(enPuno.cuerda.longitud) + ' px');
+  assert(__els.get('info-gesto').textContent === 'Puño',
+    'el HUD informa el puño: "' + __els.get('info-gesto').textContent + '"');
+
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(60);
+  const reabierta = p.colgantes.get('Right-0');
+  assert(reabierta.araña.defensa < 0.05,
+    'al abrir la mano la araña vuelve a colgar (defensa ' + reabierta.araña.defensa.toFixed(2) + ')');
+  assert(reabierta.cuerda.longitud > largoColgada * 0.85,
+    'al abrir la mano el hilo vuelve a su largo: ' + Math.round(reabierta.cuerda.longitud) + ' px');
+  assert(__els.get('info-gesto').textContent === 'Mano abierta',
+    'el HUD vuelve a informar "mano abierta"');
+
+  // La pose defensiva recoge las patas contra el cuerpo. Se comparan dos
+  // arañas con la misma fase y la misma pose, así la comparación es estable.
+  const arañaLibre = new Spider({ tamano: 1, fase: 0, p: global.__p5[0] });
+  const arañaAcurrada = new Spider({ tamano: 1, fase: 0, p: global.__p5[0] });
+  const alcanceMax = (araña) => {
+    let max = 0;
+    for (const pt of araña.patas) {
+      max = Math.max(max, Math.hypot(pt.pie.x - pt.coxa.x, pt.pie.y - pt.coxa.y));
+    }
+    return max;
+  };
+  let maxLibre = 0;
+  let maxAcurrada = 0;
+  for (let i = 0; i < 60; i++) {
+    arañaLibre.update({ x: 400, y: 300 }, Math.PI / 2, 0, 0);
+    arañaAcurrada.update({ x: 400, y: 300 }, Math.PI / 2, 0, 1);
+    maxLibre = Math.max(maxLibre, alcanceMax(arañaLibre));
+    maxAcurrada = Math.max(maxAcurrada, alcanceMax(arañaAcurrada));
+  }
+  assert(maxAcurrada < maxLibre * 0.75,
+    'la pose defensiva recoge las patas contra el cuerpo: '
+    + maxLibre.toFixed(1) + ' → ' + maxAcurrada.toFixed(1) + ' px');
   }
 
   // --- T9/T10: audio procedural ---
