@@ -5,6 +5,9 @@ de cada dedo cuelga una **araña viuda negra** en un hilo de seda, como títeres
 La araña se balancea con inercia, sube cuando dobrás un dedo, se agita cuando
 movés la mano rápido y cae con gravedad si dejás de mostrar la mano.
 
+Además reconoce **gestos** (puño, mano abierta, pellizco, índice y paz): el
+nombre del gesto aparece en el HUD y cada gesto tiene su propio sonido.
+
 Todo es procedural: no hay modelos 3D, ni imágenes, ni archivos de audio. Cero
 build step, cero npm, cero backend.
 
@@ -62,6 +65,9 @@ Todo se genera en tiempo real con la Web Audio API de p5.sound.js:
 - **Balanceo**: whoosh grave cuando la araña se sacude.
 - **Puño cerrado**: acento defensivo corto (no se repite mientras siga cerrado).
 - **Movimiento brusco**: sting disonante muy breve.
+- **Gestos**: el puño dispara el acento defensivo; abrir la mano, un whoosh
+  (las arañas bajan); el pellizco, un crujido de seda; la paz y el índice, un
+  pataleo. Cada gesto suena sólo al cambiar, no en cada frame.
 - **Ambiente**: drone evolutivo con ruido filtrado y LFO lento, que entra y sale
   con fundidos cuando aparecen y desaparecen las arañas.
 
@@ -70,7 +76,7 @@ Todo se genera en tiempo real con la Web Audio API de p5.sound.js:
 ```
 index.html   CDNs, HUD, panel de audio
 sketch.js    orquestación: cámara, modelo, cuerdas, arañas, audio, render
-hand.js      keypoints, suavizado, curl y velocidad por dedo
+hand.js      keypoints, suavizado, curl y velocidad por dedo, y gestos
 rope.js      clase Rope: cuerda de seda con Verlet
 spider.js    clase Spider: cuerpo, marca roja y 8 patas con IK
 sound.js     SoundManager: todo el audio procedural

@@ -44,6 +44,13 @@ const CONFIG = {
     minimoFps: 30,       // por debajo de esto se baja la calidad (RNF-01)
     ventana: 90          // frames para medir el promedio
   },
+  gestos: {
+    // Fase 2 · Bloque 1: reconocimiento de gestos.
+    umbralExtendido: 0.42,   // curl por debajo de esto = dedo estirado
+    umbralDoblado: 0.58,     // curl por encima de esto = dedo doblado
+    umbralPellizco: 0.42,    // distancia pulgar-índice / tamaño de la mano
+    framesEstables: 2        // frames para confirmar un gesto (evita parpadeo)
+  },
   audio: {
     umbralCreak: 200,    // px/s para que un dedo enseñe la seda
     umbralSkitter: 900,  // px/s para el pataleo rápido
@@ -76,6 +83,7 @@ const esquema = (p) => {
   let vineta = null;
 
   const seguimiento = new Mano.Seguimiento();  // suavizado, curl y velocidad
+  const reconocedor = new Mano.Gestos();       // gestos por mano (Fase 2)
   const colgantes = new Map();                  // clave: 'handedness-indiceDedo' → {cuerda, araña}
   const variacionHilo = [1, 1, 1, 1, 1];       // ±15 % por dedo (RF-10)
   const variacionAraña = [1, 1, 1, 1, 1];      // ±15 % por dedo (RF-10)
@@ -84,7 +92,6 @@ const esquema = (p) => {
   const sonido = new SoundManager();            // audio procedural (spec §15)
   const eventos = {                             // estado para disparar sonidos
     manosPrevias: 0,
-    puñoAbierto: true,
     apertura: 0
   };
 
@@ -147,14 +154,17 @@ const esquema = (p) => {
       saltoMaximo: CONFIG.saltoMaximo
     });
 
+    // Fase 2 · Bloque 1: gesto de cada mano.
+    const gestos = detectarGestos(manos);
+
     actualizarColgantes(manos, dt);
-    actualizarSonido(manos, dt);
+    actualizarSonido(manos, gestos);
 
     dibujarFondo(p);
     dibujarVineta(p);
     dibujarColgantes(p);
-    if (mostrarDebug) dibujarDebug(p, manos);
-    actualizarInfo(p, manos);
+    if (mostrarDebug) dibujarDebug(p, manos, gestos);
+    actualizarInfo(p, manos, gestos);
     medirRendimiento(p);
   };
 
@@ -241,6 +251,24 @@ const esquema = (p) => {
     } catch (err) {
       setEstado('Error al iniciar la detección', mensajeError(err), true);
     }
+  }
+
+  // --------------------------------------------------------------- gestos ---
+
+  /**
+   * Gesto de cada mano (Fase 2, Bloque 1).
+   *
+   * El umbral del puño es el mismo que ya usaba el audio
+   * (CONFIG.audio.umbralPuño), así el gesto y el sonido no se contradicen.
+   */
+  function detectarGestos(manos) {
+    return reconocedor.actualizar(manos, {
+      umbralExtendido: CONFIG.gestos.umbralExtendido,
+      umbralDoblado: CONFIG.gestos.umbralDoblado,
+      umbralPellizco: CONFIG.gestos.umbralPellizco,
+      umbralPuno: CONFIG.audio.umbralPuño,
+      framesEstables: CONFIG.gestos.framesEstables
+    });
   }
 
   // --------------------------------------------------------------- cuerdas ---
@@ -414,7 +442,7 @@ const esquema = (p) => {
   /**
    * Traduce el estado de las manos en eventos de sonido (spec §15.3).
    */
-  function actualizarSonido(manos) {
+  function actualizarSonido(manos, gestos) {
     if (!sonido.activo) return;
 
     // Aparición y desaparición (spec §15.2): una sola vez por evento.
@@ -428,12 +456,6 @@ const esquema = (p) => {
     eventos.manosPrevias = manos.length;
 
     for (const mano of manos) {
-      // Puño cerrado: disparo por flanco, no se repite mientras siga cerrado.
-      const curlMedio = mano.curl.reduce((a, b) => a + b, 0) / mano.curl.length;
-      const cerrado = curlMedio > CONFIG.audio.umbralPuño;
-      if (cerrado && eventos.puñoAbierto) sonido.puño();
-      eventos.puñoAbierto = !cerrado;
-
       for (const punta of mano.puntas) {
         const v = punta.velocidad;
         if (v > CONFIG.audio.umbralCreak) {
@@ -445,6 +467,25 @@ const esquema = (p) => {
         if (v > CONFIG.audio.umbralSting) {
           sonido.sting();
         }
+      }
+    }
+
+    // Gesto nuevo (Fase 2, Bloque 1): un sonido por gesto, y sólo al cambiar.
+    //
+    // DECISIÓN: el sonido del puño pasa a dispararse desde el reconocedor de
+    // gestos y no desde el curl medio. El detector exige que los cuatro dedos
+    // largos estén doblados, así que el umbral queda más estricto que antes,
+    // y el disparo es por mano (antes era global: con dos manos sólo sonaba
+    // una vez).
+    for (const g of gestos) {
+      if (!g.cambio) continue;
+      switch (g.gesto.id) {
+        case 'puño': sonido.puño(); break;
+        case 'abierta': sonido.whoosh(0.55); break;
+        case 'pellizco': sonido.creak(0.5); break;
+        case 'paz': sonido.skitter(0.45); break;
+        case 'indice': sonido.skitter(0.3); break;
+        default: break;
       }
     }
 
@@ -537,7 +578,7 @@ const esquema = (p) => {
     p2.pop();
   }
 
-  function dibujarDebug(p2, manos) {
+  function dibujarDebug(p2, manos, gestos) {
     p2.push();
     for (const mano of manos) {
       const puntos = mano.puntos;
@@ -581,16 +622,39 @@ const esquema = (p) => {
           punta.y + 16
         );
       }
+
+      // Gesto de la mano (Fase 2, Bloque 1), junto a la muñeca.
+      const gesto = gestos ? gestos.find((g) => g.id === mano.handedness) : null;
+      if (gesto && puntos[0]) {
+        p2.textSize(13);
+        p2.textAlign(p2.LEFT, p2.TOP);
+        p2.fill(226, 176, 84, 230);
+        p2.text(gesto.gesto.nombre, puntos[0].x + 12, puntos[0].y + 8);
+      }
     }
     p2.pop();
   }
 
-  function actualizarInfo(p2, manos) {
+  function actualizarInfo(p2, manos, gestos) {
     if (p2.frameCount - ultimoUpdateInfo < 10) return;
     ultimoUpdateInfo = p2.frameCount;
     document.getElementById('info-manos').textContent = String(manos.length);
     document.getElementById('info-fps').textContent = String(Math.round(p2.frameRate()));
     document.getElementById('info-estado').textContent = estadoTexto(manos.length);
+    document.getElementById('info-gesto').textContent = textoGesto(gestos);
+  }
+
+  /**
+   * Nombre del gesto de la(s) mano(s) para el HUD (Fase 2, Bloque 1).
+   * Con dos manos se listan los gestos distintos, separados por " / ".
+   */
+  function textoGesto(gestos) {
+    if (!gestos || gestos.length === 0) return '—';
+    const nombres = [];
+    for (const g of gestos) {
+      if (nombres.indexOf(g.gesto.nombre) === -1) nombres.push(g.gesto.nombre);
+    }
+    return nombres.join(' / ');
   }
 
   function estadoTexto(cantidad) {

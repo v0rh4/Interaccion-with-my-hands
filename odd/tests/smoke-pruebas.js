@@ -248,7 +248,72 @@
   assert(Math.max.apply(null, visibilidades) > 0.7, 'el vientre llega a verse (marca roja)');
   assert(Math.min.apply(null, visibilidades) < 0.4, 'el vientre también se oculta a ratos');
 
+  // --- Fase 2 · Bloque 1: el reconocedor de gestos (clasificador puro) ---
+  // (tests del clasificador: no dependen de la cámara, así que van fuera del
+  //  bloque que necesita detectStart)
+
+  const clasificarFalsa = (curls) => {
+    const pts = manoFalsa(curls);
+    return Mano.clasificar({ curl: Mano.calcularCurl(pts), puntos: pts });
+  };
+
+  assert(clasificarFalsa([0, 0, 0, 0, 0]).id === 'abierta',
+    'mano estirada → gesto "mano abierta"');
+  assert(clasificarFalsa([1, 1, 1, 1, 1]).id === 'puño',
+    'mano cerrada → gesto "puño"');
+  assert(clasificarFalsa([0, 0, 1, 1, 1]).id === 'indice',
+    'sólo el índice extendido → gesto "índice"');
+  assert(clasificarFalsa([0, 0, 0, 1, 1]).id === 'paz',
+    'índice y medio extendidos → gesto "paz"');
+
+  // Pellizco: las puntas del pulgar y del índice se tocan, con el índice apenas
+  // doblado (curl bajo) y el pulgar no enroscado.
+  const manoPellizco = manoFalsa([0, 0, 0, 0, 0]);
+  manoPellizco[8] = { x: 300, y: 232.5, z: 0, score: 1, name: Mano.NOMBRES[8] };
+  manoPellizco[4] = { x: 300, y: 232.5, z: 0, score: 1, name: Mano.NOMBRES[4] };
+  const gestoPellizco = Mano.clasificar({
+    curl: Mano.calcularCurl(manoPellizco),
+    puntos: manoPellizco
+  });
+  assert(gestoPellizco.id === 'pellizco',
+    'pulgar e índice juntos → gesto "pellizco" (id ' + gestoPellizco.id + ')');
+
+  // Un puño no se confunde con un pellizco: en el puño el índice está muy
+  // doblado, así que el pellizco se descarta y gana el puño.
+  const curledPuno = clasificarFalsa([1, 1, 1, 1, 1]);
+  assert(curledPuno.id === 'puño', 'el puño no se clasifica como pellizco');
+
+  // --- Fase 2 · Bloque 1: estabilidad del gesto (no parpadea) ---
+  const detector = new Mano.Gestos();
+  const manoAbierta = {
+    curl: Mano.calcularCurl(manoFalsa([0, 0, 0, 0, 0])),
+    puntos: manoFalsa([0, 0, 0, 0, 0]),
+    handedness: 'Right'
+  };
+  const manoPuno = {
+    curl: Mano.calcularCurl(manoFalsa([1, 1, 1, 1, 1])),
+    puntos: manoFalsa([1, 1, 1, 1, 1]),
+    handedness: 'Right'
+  };
+
+  const g1 = detector.actualizar([manoAbierta], { framesEstables: 2 });
+  assert(g1[0].gesto.id === 'abierta', 'el primer frame ya define el gesto inicial');
+  assert(g1[0].cambio === false, 'la aparición de la mano no cuenta como cambio de gesto');
+
+  const g2 = detector.actualizar([manoPuno], { framesEstables: 2 });
+  assert(g2[0].gesto.id === 'abierta', 'un solo frame no cambia el gesto (estabilidad)');
+  assert(g2[0].cambio === false, 'no se reporta cambio hasta confirmar el gesto');
+
+  const g3 = detector.actualizar([manoPuno], { framesEstables: 2 });
+  assert(g3[0].gesto.id === 'puño', 'a los 2 frames seguidos el gesto nuevo se confirma');
+  assert(g3[0].cambio === true, 'el cambio de gesto se reporta');
+
+  const g4 = detector.actualizar([manoPuno], { framesEstables: 2 });
+  assert(g4[0].cambio === false, 'el cambio se reporta una sola vez (no cada frame)');
+
   // --- T5/T6: una araña por cuerda en el sketch ---
+  // (guard: en los escenarios sin cámara o sin modelo no hay detectStart)
+  if (global.__ml5.detectStart) {
   global.__ml5.detectStart.cb([{ keypoints, handedness: 'Right', confidence: 0.95 }]);
   p.ellipseCalls = 0;
   p.hiloCalls = 0;
@@ -316,6 +381,8 @@
   assert(reenganchada !== undefined, 'la araña vuelve cuando la mano reaparece');
   assert(reenganchada.cuerda.anclada === true, 'la araña se vuelve a enganchar');
   assert(reenganchada.opacidad === 1, 'vuelve a verse opaca');
+
+  }
 
   // --- T9/T10: audio procedural ---
   const gestor = new SoundManager();
