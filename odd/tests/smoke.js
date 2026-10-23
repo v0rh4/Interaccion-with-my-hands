@@ -66,7 +66,8 @@ global.WebGLRenderingContext = function () {};
 function paramFalso(valor) {
   return {
     value: valor === undefined ? 0 : valor,
-    setValueAtTime() { return this; },
+    ultimo: valor,
+    setValueAtTime(v) { this.value = v; this.ultimo = v; return this; },
     linearRampToValueAtTime() { return this; },
     exponentialRampToValueAtTime() { return this; },
     setTargetAtTime(valor) { this.value = valor; return this; },
@@ -106,6 +107,16 @@ function contextoFalso() {
     createBiquadFilter: () => nodoFalso(ctx, 'filter'),
     createBufferSource: () => nodoFalso(ctx, 'buffer'),
     createConvolver: () => nodoFalso(ctx, 'convolver'),
+    createDynamicsCompressor: () => {
+      const n = nodoFalso(ctx, 'compresor');
+      n.threshold = paramFalso(-24);
+      n.knee = paramFalso(30);
+      n.ratio = paramFalso(12);
+      n.attack = paramFalso(0.003);
+      n.release = paramFalso(0.25);
+      n.reduction = 0;
+      return n;
+    },
     createBuffer: (canales, largo) => ({
       length: largo,
       getChannelData: () => new Float32Array(largo)
@@ -165,7 +176,7 @@ class P5Stub {
       // Ojo: sin `filter`, como Safari viejo: el Bloque 3 tiene que caer al tint().
       save() {}, restore() {}, beginPath() {}, ellipse() {}, fill() {}, fillRect() {},
       arc(x, y, r) { P5Stub.registrar(global.__p5[0], 'arc', [x, y, r]); },
-      translate() {}, scale() {}, closePath() {},
+      translate() {}, scale() {}, rotate() {}, closePath() {},
       fillStyle: '',
       globalCompositeOperation: 'source-over',
       createRadialGradient: () => {
@@ -193,6 +204,7 @@ class P5Stub {
   }
   tint() { this.tintLlamado = (this.tintLlamado || 0) + 1; }
   noTint() { this.noTintLlamado = (this.noTintLlamado || 0) + 1; }
+  userStartAudio() { this.arranquesAudio = (this.arranquesAudio || 0) + 1; }
   pixelDensity() {} frameRate() {} background() {} push() {} pop() {}
   translate() {} scale() {} image() { P5Stub.registrar(this, 'image', []); } rect() {} noStroke() {}
   stroke() {} strokeWeight() {} circle() {} line() {} noFill() {}
@@ -208,7 +220,7 @@ class P5Stub {
     const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453;
     return v - Math.floor(v);
   }
-  textSize() {} textAlign() {} text() {}
+  textSize() {} textAlign() {} text() { this.textoCalls = (this.textoCalls || 0) + 1; }
   color(r, g, b, a) { return { r, g, b, a }; }
   createCapture(type, opciones) {
     const listeners = {};
@@ -270,6 +282,9 @@ Object.defineProperty(globalThis, 'navigator', { value: {
 // ------------------------------------------------------------------ código
 const hand = fs.readFileSync(path.join(RAIZ, 'hand.js'), 'utf8');
 const gestures = fs.readFileSync(path.join(RAIZ, 'gestures.js'), 'utf8');
+const poses = fs.readFileSync(path.join(RAIZ, 'poses.js'), 'utf8');
+const palettes = fs.readFileSync(path.join(RAIZ, 'palettes.js'), 'utf8');
+const audio = fs.readFileSync(path.join(RAIZ, 'audio.js'), 'utf8');
 const light = fs.readFileSync(path.join(RAIZ, 'light.js'), 'utf8');
 const rope = fs.readFileSync(path.join(RAIZ, 'rope.js'), 'utf8');
 const spider = fs.readFileSync(path.join(RAIZ, 'spider.js'), 'utf8');
@@ -277,4 +292,4 @@ const sound = fs.readFileSync(path.join(RAIZ, 'sound.js'), 'utf8');
 const sketch = fs.readFileSync(path.join(RAIZ, 'sketch.js'), 'utf8');
 const pruebas = fs.readFileSync(path.join(__dirname, 'smoke-pruebas.js'), 'utf8');
 
-vm.runInThisContext(hand + '\n' + gestures + '\n' + light + '\n' + rope + '\n' + spider + '\n' + sound + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });
+vm.runInThisContext(hand + '\n' + gestures + '\n' + poses + '\n' + palettes + '\n' + audio + '\n' + light + '\n' + rope + '\n' + spider + '\n' + sound + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });

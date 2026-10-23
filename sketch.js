@@ -81,6 +81,19 @@ const CONFIG = {
     vignetteStrength: 0.62,  // fuerza de la viñeta de los bordes (RF-26)
     brilloMinimo: 0.35       // piso de brillo de arañas e hilos lejos de la luz (RF-25)
   },
+  poses: {
+    // Fase 3 · Bloque 5: umbrales y tiempos del clasificador de poses (spec §29).
+    extendido: 0.35,       // curl por debajo de esto = dedo extendido (RF-37)
+    doblado: 0.6,          // curl por encima de esto = dedo doblado (RF-37)
+    peaceHoldMs: 250,      // cuánto hay que sostener la paz (RF-38)
+    rockHoldMs: 300,       // cuánto hay que sostener el rock (RF-39)
+    frenzyHoldMs: 200,     // cuánto hay que sostener puño + mano abierta (RF-40)
+    monsterMinMs: 3000,    // mínimo que queda el modo monstruo al soltar el rock (RF-61)
+    // Fase 3 · Bloque 6: color (spec §29 y RF-50).
+    colorCooldown: 600,    // ms mínimos entre cambios de paleta (RF-46)
+    colorTransition: 0.4,  // segundos del lerp de color (RF-45)
+    colorDelayMs: 150      // retraso máximo por araña para que el cambio sea en onda (RF-50)
+  },
   audio: {
     umbralCreak: 200,    // px/s para que un dedo enseñe la seda
     umbralSkitter: 900,  // px/s para el pataleo rápido
@@ -112,6 +125,13 @@ const esquema = (p) => {
 
   const seguimiento = new Mano.Seguimiento();  // suavizado, curl y velocidad
   const gestos = Gestos.crear();                // puño y separación (Fase 2)
+  const poses = Poses.crear();                  // poses y modos (Fase 3)
+  let estadoPoses = null;                       // resultado del frame actual
+  let enFrenesi = false;                        // atajo de poses.modos.frenzy
+  let paletaAplicada = 0;                       // última paleta aplicada a las arañas
+  let tiempoPaz = 0;                            // ms con la paz sostenida (RF-46)
+  let pazPrevia = false;                        // para detectar la entrada en paz
+  let cooldownColor = 0;                        // ms que faltan para el próximo cambio (RF-46)
   const colgantes = new Map();                  // clave: 'handedness-indiceDedo' → {cuerda, araña}
   let featurePuno = true;                       // tecla F: prende/apaga el puño (RNF-08)
   const variacionHilo = [1, 1, 1, 1, 1];       // ±15 % por dedo (RF-10)
@@ -147,6 +167,9 @@ const esquema = (p) => {
     p.colgantes = colgantes;
     p.seguimiento = seguimiento;
     p.luz = luz;
+    p.poses = poses;
+    // Para los tests: ¿está prendido el overlay de debug?
+    p.enDebug = () => mostrarDebug;
 
     // Cada dedo con su propio largo de hilo, tamaño y fase (RF-10).
     for (let i = 0; i < variacionHilo.length; i++) {
@@ -194,6 +217,41 @@ const esquema = (p) => {
       spreadOff: CONFIG.gestos.spreadOff
     });
 
+    // Fase 3: poses de cada mano y modos (color, frenesí, monstruos).
+    const manosPoses = manos.map((mano) => {
+      const gesto = gestosManos.find((g) => g.id === mano.handedness);
+      return {
+        handedness: mano.handedness,
+        curl: mano.curl,
+        enPuño: gesto ? gesto.enPuño : false
+      };
+    });
+    estadoPoses = poses.actualizar(manosPoses, dt, CONFIG.poses);
+    enFrenesi = estadoPoses.modos.frenzy;
+
+    // Fase 3 (RF-45/RF-46): la paz cambia de paleta, y si se mantiene sigue
+    // ciclando cada 1 s, con el cooldown mínimo entre cambios.
+    cooldownColor = Math.max(0, cooldownColor - dt * 1000);
+    const enPaz = estadoPoses.manos.some((entrada) => entrada.pose === 'paz');
+    if (enPaz) {
+      tiempoPaz += dt * 1000;
+      if (cooldownColor <= 0 && (!pazPrevia || tiempoPaz >= 1000)) {
+        poses.siguientePaleta();
+        cooldownColor = CONFIG.poses.colorCooldown + 400;
+        tiempoPaz = 0;
+      }
+      pazPrevia = true;
+    } else {
+      pazPrevia = false;
+      tiempoPaz = 0;
+    }
+
+    // Si el índice cambió (por la pose o por las teclas), se aplica a todas.
+    if (poses.modos.palette !== paletaAplicada) {
+      paletaAplicada = poses.modos.palette;
+      aplicarPaleta(paletaAplicada);
+    }
+
     actualizarColgantes(manos, dt);
     actualizarSonido(manos, gestosManos);
 
@@ -217,6 +275,20 @@ const esquema = (p) => {
     if (p.key === 'f' || p.key === 'F') featurePuno = !featurePuno;
     // L prende y apaga la linterna (RNF-08).
     if (p.key === 'l' || p.key === 'L') luz.activada = !luz.activada;
+
+    // Fase 3: pruebas sin mano. RF-44 pide 1/2/3 y RNF-12 pide C/X/R; se
+    // aceptan las dos variantes (DECISIÓN).
+    // RF-70: cualquier tecla es un gesto válido para arrancar el audio.
+    if (!Audio.activo()) Audio.iniciar(p, sonido);
+
+    // RF-71: M silencia, +/- mueven el volumen maestro.
+    if (p.key === 'm' || p.key === 'M') Audio.toggleMute();
+    if (p.key === '+' || p.key === '=') Audio.setVolumen(Audio.volumen() + 0.1);
+    if (p.key === '-' || p.key === '_') Audio.setVolumen(Audio.volumen() - 0.1);
+
+    if (p.key === '1' || p.key === 'c' || p.key === 'C') poses.siguientePaleta();
+    if (p.key === '2' || p.key === 'x' || p.key === 'X') poses.alternarFrenesi();
+    if (p.key === '3' || p.key === 'r' || p.key === 'R') poses.alternarMonstruo();
   };
 
   p.windowResized = () => {
@@ -334,7 +406,9 @@ const esquema = (p) => {
     const activas = new Set();
 
     for (const mano of manos) {
-      const enPuño = featurePuno && gestos.isFist(mano);
+      // RF-41: un puño solo (o dos) conserva la Fase 2; el frenesí (puño +
+      // otra mano abierta) tiene prioridad y suelta a las arañas.
+      const enPuño = featurePuno && !enFrenesi && gestos.isFist(mano);
       const palma = centroDePalma(mano);
 
       for (const punta of mano.puntas) {
@@ -364,7 +438,10 @@ const esquema = (p) => {
           // Con la feature apagada (tecla F) la araña vuelve a colgar.
           araña.colgar();
         } else if (araña.estado === Spider.ESTADOS.COLGANDO) {
-          if (enPuño) araña.trepar(0, 0);        // entra en CLIMBING
+          if (enPuño) {
+            araña.trepar(0, 0);                  // entra en CLIMBING
+            Audio.hide();                        // roce de patitas (RF-72)
+          }
         } else if (araña.estado === Spider.ESTADOS.TREPANDO) {
           if (!enPuño) {
             araña.colgar();                      // se abrió la mano antes de llegar
@@ -429,6 +506,9 @@ const esquema = (p) => {
         colgante.velocidadBalanceo = Math.hypot(fin.x - colgante.finX, fin.y - colgante.finY) / dt;
         colgante.finX = fin.x;
         colgante.finY = fin.y;
+
+        // Fase 3 (RF-45): la transición de color avanza con el dt real.
+        araña.actualizarColor(dt);
 
         if (araña.estado === Spider.ESTADOS.LANZANDO) {
           // Vuelo libre con el hilo estirándose detrás (rebote elástico, RF-15).
@@ -507,7 +587,16 @@ const esquema = (p) => {
       fase: faseAraña[punta.indice],
       p: p
     });
-    return { cuerda: cuerda, araña: araña, soltada: false, opacidad: 1, caida: 0, velocidadBalanceo: 0 };
+    // El tinte del hilo se reusa frame a frame (RNF-11).
+    return {
+      cuerda: cuerda,
+      araña: araña,
+      soltada: false,
+      opacidad: 1,
+      caida: 0,
+      velocidadBalanceo: 0,
+      tinte: { r: 226, g: 220, b: 205 }
+    };
   }
 
   // ---------------------------------------------------------------- audio ---
@@ -519,6 +608,8 @@ const esquema = (p) => {
       boton.addEventListener('click', () => {
         if (sonido.activo) return;
         if (sonido.iniciar(p)) {
+          // El gesto del botón también habilita el audio de la Fase 3 (RF-70).
+          Audio.iniciar(p, sonido);
           boton.classList.add('activo');
           boton.textContent = 'Sonido activo';
           boton.disabled = true;
@@ -601,11 +692,13 @@ const esquema = (p) => {
       if (g.cambio && g.enPuño) sonido.puño();
     }
 
-    // Fase 2, Bloque 2: whoosh cuando una araña sale disparada (RF-15).
+    // Fase 2, Bloque 2: cuando una araña sale disparada (RF-15).
+    // Fase 3 (RF-72): el sonido de la salida es el pop de audio.js; el whoosh
+    // queda para el balanceo (§33: si algo choca, manda el documento de Fase 3).
     for (const colgante of colgantes.values()) {
       if (colgante.sonarLanzamiento) {
         colgante.sonarLanzamiento = false;
-        sonido.whoosh(0.6);
+        Audio.launch();
       }
     }
 
@@ -624,6 +717,23 @@ const esquema = (p) => {
       if (colgante.velocidadBalanceo > CONFIG.audio.umbralBalanceo) {
         sonido.whoosh(Math.min(1, colgante.velocidadBalanceo / 600));
       }
+    }
+  }
+
+  /**
+   * Aplica una paleta a todas las arañas (RF-45) con un retraso aleatorio por
+   * araña, para que el cambio llegue en onda y no de golpe (RF-50).
+   */
+  function aplicarPaleta(indice) {
+    const paleta = Paletas.paleta(indice);
+    // RF-72: el cambio de color suena con la campanita de esa paleta.
+    Audio.colorChime(indice);
+    for (const colgante of colgantes.values()) {
+      colgante.araña.setPaleta(
+        paleta,
+        Math.random() * CONFIG.poses.colorDelayMs,
+        CONFIG.poses.colorTransition
+      );
     }
   }
 
@@ -675,7 +785,9 @@ const esquema = (p) => {
     // (RF-14).
     for (const colgante of colgantes.values()) {
       if (colgante.araña.estado === Spider.ESTADOS.OCULTA) continue;
-      colgante.cuerda.dibujar(p2, null, colgante.opacidad, CONFIG.calidad.halo);
+      // RF-49: el hilo lleva un 30 % del color de acento de su araña.
+      Paletas.tinteHilo(colgante.araña.color, null, colgante.tinte);
+      colgante.cuerda.dibujar(p2, colgante.tinte, colgante.opacidad, CONFIG.calidad.halo);
     }
     for (const colgante of colgantes.values()) {
       colgante.araña.draw(p2);
@@ -742,6 +854,21 @@ const esquema = (p) => {
           'puño: ' + (gestos.isFist(mano) ? 'sí' : 'no') + '  sep: ' + pares,
           puntos[0].x + 12,
           puntos[0].y + 8
+        );
+
+        // Fase 3 (RF-43): la pose de esta mano y los modos activos.
+        const poseMano = poses.poseDe(mano.handedness);
+        const candidata = poses.candidataDe(mano.handedness);
+        p2.fill(estadoPoses && estadoPoses.modos.monster ? p2.color(228, 70, 92) : p2.color(180, 220, 255));
+        p2.text(
+          'pose: ' + (poseMano === 'ninguna' && candidata !== 'ninguna' ? candidata + '…' : poseMano)
+          + '  modos: ' + (estadoPoses
+            ? 'paleta ' + (estadoPoses.modos.palette + 1)
+              + (estadoPoses.modos.frenzy ? ' FRENESÍ' : '')
+              + (estadoPoses.modos.monster ? ' MONSTRUO' : '')
+            : '—'),
+          puntos[0].x + 12,
+          puntos[0].y + 26
         );
       }
     }

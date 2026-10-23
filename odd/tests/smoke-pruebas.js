@@ -565,9 +565,185 @@
     'con el brillo al 35 % los ojos siguen a plena intensidad (RF-25)');
   assert(puntosOjos.length === 2, 'los ojos tienen posición propia');
 
+  // --- Fase 3 · Bloque 5: poses de mano (tareas 21-22) ---
+  const CFG_POSES = {
+    extendido: 0.35,
+    doblado: 0.6,
+    peaceHoldMs: 250,
+    rockHoldMs: 300,
+    frenzyHoldMs: 200,
+    monsterMinMs: 3000
+  };
+
+  /** Mano sintética para el clasificador de poses. */
+  const manoPose = (curls, enPuño, handedness) => ({
+    handedness: handedness || 'Right',
+    curl: curls,
+    enPuño: !!enPuño
+  });
+
+  const poses = Poses.crear();
+  const pazMano = manoPose([0.9, 0.1, 0.1, 0.9, 0.9], false);
+  const rockMano = manoPose([0.9, 0.1, 0.9, 0.9, 0.1], false);
+  const abiertaMano = manoPose([0.1, 0.1, 0.1, 0.1, 0.1], false);
+  const puñoMano = manoPose([0.9, 0.9, 0.9, 0.9, 0.9], true);
+
+  let rp = poses.actualizar([pazMano], 0.016, CFG_POSES);
+  assert(rp.manos[0].pose === 'ninguna', 'la paz no se confirma en el primer frame (RF-38)');
+  for (let i = 0; i < 20; i++) rp = poses.actualizar([pazMano], 0.016, CFG_POSES);
+  assert(rp.manos[0].pose === 'paz', 'con 250 ms sostenidos la paz se confirma (RF-38)');
+
+  // RF-39: el rock necesita 300 ms y se pierde si deja de cumplirse 300 ms.
+  const posesRock = Poses.crear();
+  for (let i = 0; i < 10; i++) rp = posesRock.actualizar([rockMano], 0.016, CFG_POSES);
+  assert(rp.manos[0].pose === 'ninguna', 'a los 160 ms el rock todavía no se confirma (RF-39)');
+  for (let i = 0; i < 10; i++) rp = posesRock.actualizar([rockMano], 0.016, CFG_POSES);
+  assert(rp.manos[0].pose === 'rock', 'a los 320 ms el rock se confirma (RF-39)');
+  for (let i = 0; i < 10; i++) rp = posesRock.actualizar([abiertaMano], 0.016, CFG_POSES);
+  assert(rp.manos[0].pose === 'rock', 'el rock aguanta 160 ms sin cumplirse (RF-39)');
+  for (let i = 0; i < 12; i++) rp = posesRock.actualizar([abiertaMano], 0.016, CFG_POSES);
+  assert(rp.manos[0].pose === 'ninguna', 'y a los 300 ms se pierde (RF-39)');
+
+  // RF-37: la zona 0.35-0.6 mantiene el estado anterior del dedo (histéresis).
+  const posesHist = Poses.crear();
+  for (let i = 0; i < 20; i++) posesHist.actualizar([abiertaMano], 0.016, CFG_POSES);
+  const medioDudoso = manoPose([0.1, 0.1, 0.5, 0.5, 0.1], false);
+  for (let i = 0; i < 20; i++) posesHist.actualizar([medioDudoso], 0.016, CFG_POSES);
+  assert(posesHist.dedosDe('Right')[2] === true,
+    'un curl de 0.5 mantiene el dedo como estaba (extendido, RF-37)');
+  const medioDoblado = manoPose([0.1, 0.1, 0.9, 0.9, 0.1], false);
+  for (let i = 0; i < 5; i++) posesHist.actualizar([medioDoblado], 0.016, CFG_POSES);
+  for (let i = 0; i < 20; i++) posesHist.actualizar([medioDudoso], 0.016, CFG_POSES);
+  assert(posesHist.dedosDe('Right')[2] === false,
+    'y un dedo doblado sigue doblado con 0.5 (RF-37)');
+
+  // RF-40: el frenesí necesita un puño y OTRA mano visible que no sea puño.
+  const posesFrenesi = Poses.crear();
+  for (let i = 0; i < 20; i++) rp = posesFrenesi.actualizar([puñoMano, abiertaMano], 0.016, CFG_POSES);
+  assert(rp.modos.frenzy === true, 'un puño + otra mano abierta activan el frenesí (RF-40)');
+
+  // RF-41: un puño solo, o dos puños, conservan el comportamiento de la Fase 2.
+  const posesSoloPuño = Poses.crear();
+  for (let i = 0; i < 25; i++) rp = posesSoloPuño.actualizar([puñoMano], 0.016, CFG_POSES);
+  assert(rp.modos.frenzy === false, 'un puño solo NO activa el frenesí (RF-41)');
+
+  const posesDosPuños = Poses.crear();
+  const puñoIzq = manoPose([0.9, 0.9, 0.9, 0.9, 0.9], true, 'Left');
+  for (let i = 0; i < 25; i++) rp = posesDosPuños.actualizar([puñoMano, puñoIzq], 0.016, CFG_POSES);
+  assert(rp.modos.frenzy === false, 'dos puños tampoco activan el frenesí (RF-41)');
+
+  // El frenesí también necesita sostenerse 200 ms.
+  const posesFrenesiCorto = Poses.crear();
+  for (let i = 0; i < 8; i++) rp = posesFrenesiCorto.actualizar([puñoMano, abiertaMano], 0.016, CFG_POSES);
+  assert(rp.modos.frenzy === false, 'el frenesí no se activa a los 128 ms (RF-40)');
+
+  // RF-42: los modos son banderas independientes y se pueden combinar.
+  const posesModos = Poses.crear();
+  posesModos.alternarFrenesi();
+  posesModos.alternarMonstruo();
+  posesModos.siguientePaleta();
+  assert(posesModos.modos.frenzy === true && posesModos.modos.monster === true,
+    'frenesí y monstruos son banderas independientes (RF-42)');
+  assert(posesModos.modos.palette === 1, 'la paleta avanza con su propio índice (RF-42)');
+
+  // RF-61: el modo monstruo se mantiene un mínimo de 3 s al soltar la pose.
+  const posesMonster = Poses.crear();
+  for (let i = 0; i < 25; i++) posesMonster.actualizar([rockMano], 0.016, CFG_POSES);
+  assert(posesMonster.modos.monster === true, 'el rock enciende el modo monstruo (RF-61)');
+  posesMonster.actualizar([abiertaMano], 0.25, CFG_POSES);
+  assert(posesMonster.modos.monster === true,
+    'al soltar la pose el modo monstruo sigue un mínimo de 3 s (RF-61)');
+  for (let i = 0; i < 13; i++) posesMonster.actualizar([abiertaMano], 0.25, CFG_POSES);
+  assert(posesMonster.modos.monster === false, 'y después de 3 s revierte (RF-61)');
+
+  // --- Fase 3 · Bloque 6: paletas y color de las arañas (tareas 23-24) ---
+  const paletas = Paletas.LISTA;
+  assert(Paletas.cantidad() === 6, 'hay seis paletas (RF-47)');
+  assert(paletas[0].nombre === 'Clásica' && paletas[1].nombre === 'Neón azul',
+    'el orden es el del spec (RF-47)');
+  assert(paletas.every((p) => p.cuerpo && p.acento && p.ojos && 'halo' in p),
+    'cada paleta trae cuerpo, acento, ojos y halo (RF-47)');
+  assert(paletas[0].halo === null, 'la clásica no tiene halo (RF-47)');
+  assert(Paletas.paleta(7).nombre === 'Neón azul', 'el índice de paleta da la vuelta (RF-46)');
+  assert(Paletas.paleta(-1).nombre === 'Fantasma', 'y también para atrás');
+
+  const mezcla = Paletas.mezclar([0, 0, 0], [100, 200, 40], 0.5);
+  assert(mezcla[0] === 50 && mezcla[1] === 100 && mezcla[2] === 20,
+    'mezclar() interpola canal por canal (RF-45)');
+  const tinte = Paletas.tinteHilo(Paletas.paleta(1));
+  const esperadoTinte = Paletas.mezclar([226, 220, 205], Paletas.paleta(1).acento, 0.3);
+  assert(tinte[1] === esperadoTinte[1], 'el hilo se tiñe con un 30 % del acento (RF-49)');
+  const copia = Paletas.copia(Paletas.paleta(2));
+  copia.cuerpo[0] = 999;
+  assert(Paletas.paleta(2).cuerpo[0] !== 999, 'copia() no comparte los arrays de la paleta');
+
+  // El color de la araña arranca en la paleta clásica y transiciona con lerp.
+  const arañaColor = new Spider({ tamano: 1, fase: 0, p: p5Stub });
+  assert(arañaColor.color.nombre === 'Clásica', 'la araña arranca con la paleta clásica');
+  assert(arañaColor.color.cuerpo[0] === Paletas.paleta(0).cuerpo[0],
+    'y su cuerpo usa el color de esa paleta (RF-48)');
+
+  arañaColor.setPaleta(Paletas.paleta(1), 0);
+  arañaColor.actualizarColor(0.2);
+  const medio = arañaColor.color.acento[2];
+  const destino = Paletas.paleta(1).acento[2];
+  const origen = Paletas.paleta(0).acento[2];
+  assert(medio > origen && medio < destino,
+    'a mitad de la transición el color está entre los dos (RF-45): ' + Math.round(medio));
+  for (let i = 0; i < 30; i++) arañaColor.actualizarColor(0.02);
+  assert(arañaColor.color.acento[2] === destino,
+    'y al terminar la transición (~0.4 s) llega al color nuevo (RF-45)');
+
+  // RF-50: el cambio puede llevar retraso (la onda entre arañas).
+  const arañaOnda = new Spider({ tamano: 1, fase: 0, p: p5Stub });
+  arañaOnda.setPaleta(Paletas.paleta(2), 150);
+  arañaOnda.actualizarColor(0.1);
+  assert(arañaOnda.color.nombre === 'Clásica',
+    'con retraso pendiente el color todavía no cambió (RF-50)');
+  arañaOnda.actualizarColor(0.06);
+  arañaOnda.actualizarColor(0.05);
+  assert(arañaOnda.color.acento[1] > Paletas.paleta(0).acento[1],
+    'y después de su retraso empieza a cambiar (RF-50)');
+
+  // RF-48/RNF-11: el halo emisivo se cachea y no se rehace por frame.
+  const arañaHalo = new Spider({ tamano: 1, fase: 0, p: p5Stub });
+  arañaHalo.setPaleta(Paletas.paleta(1), 0);
+  for (let i = 0; i < 30; i++) arañaHalo.actualizarColor(0.02);
+  arañaHalo.brillo = 0.35;
+  arañaHalo.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+  p5Stub.gradientesCreados = 0;
+  arañaHalo.draw(p5Stub);
+  assert(p5Stub.gradientesCreados >= 1, 'la araña con paleta de halo dibuja un halo (RF-48)');
+  p5Stub.gradientesCreados = 0;
+  arañaHalo.draw(p5Stub);
+  assert(p5Stub.gradientesCreados === 0,
+    'y en el frame siguiente reutiliza los gradientes (RNF-11)');
+
+  const arañaSinHalo = new Spider({ tamano: 1, fase: 0, p: p5Stub });
+  arañaSinHalo.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+  arañaSinHalo.draw(p5Stub);          // primer dibujo: crea el brillo especular
+  p5Stub.gradientesCreados = 0;
+  arañaSinHalo.draw(p5Stub);
+  assert(p5Stub.gradientesCreados === 0,
+    'la paleta clásica no tiene halo y no crea gradientes nuevos (RF-47, RNF-11)');
+
+  // El cuerpo, la marca y los ojos salen de la paleta (RF-48).
+  const arañaFantasma = new Spider({ tamano: 1, fase: 0, p: p5Stub });
+  arañaFantasma.setPaleta(Paletas.paleta(5), 0);
+  for (let i = 0; i < 30; i++) arañaFantasma.actualizarColor(0.02);
+  arañaFantasma.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+  p5Stub.registro.length = 0;
+  arañaFantasma.draw(p5Stub);
+  const cuerpoClaro = p5Stub.registro.filter((c) => c.op === 'fill' && c.args[0] > 150);
+  assert(cuerpoClaro.length > 0, 'la paleta fantasma pinta el cuerpo claro (RF-47)');
+  const ojosAzules = p5Stub.registro.filter((c) => c.op === 'fill' && c.args[2] > 200 && c.args[0] > 200);
+  assert(ojosAzules.length >= 2, 'y los ojos con su color (RF-48)');
+
   // --- T5/T6: una araña por cuerda en el sketch ---
   // (guard: en los escenarios sin cámara o sin modelo no hay detectStart)
   if (global.__ml5.detectStart) {
+
+
   global.__ml5.detectStart.cb([{ keypoints, handedness: 'Right', confidence: 0.95 }]);
   p.ellipseCalls = 0;
   p.hiloCalls = 0;
@@ -855,6 +1031,165 @@
     && c.args[2] === 6 && c.args[3] === 200),
     'y se conserva el oscurecido de la Fase 1 (RNF-08)');
   p.key = 'l';
+  p.keyPressed();
+
+  // --- Fase 3 · Bloque 5: regla de prioridad de puños en el sketch (RF-41) ---
+  const manoAppIzquierda = { keypoints: aPuntos(manoFalsa([0, 0, 0, 0, 0])), handedness: 'Left' };
+
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(20);
+  assert(!!p.poses, 'el sketch expone el detector de poses');
+  assert(p.poses.dedosDe('Right') !== null, 'el sketch clasifica los dedos de la mano (RF-37)');
+
+  // RF-41: un puño solo conserva el comportamiento de la Fase 2.
+  global.__ml5.detectStart.cb([manoAppCerrada]);
+  avanzar(45);
+  assert(p.colgantes.get('Right-0').araña.estado === Spider.ESTADOS.TREPANDO,
+    'con un puño solo la araña trepa igual que en la Fase 2 (RF-41)');
+  assert(p.poses.modos.frenzy === false, 'y el frenesí no se activa (RF-41)');
+
+  // RF-40/RF-41: puño + otra mano abierta = frenesí, y el puño ya no trepa.
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(30);
+  assert(p.poses.modos.frenzy === false, 'con las dos manos abiertas no hay frenesí');
+
+  global.__ml5.detectStart.cb([manoAppCerrada, manoAppIzquierda]);
+  avanzar(30);
+  assert(p.poses.modos.frenzy === true,
+    'con un puño y la otra mano abierta se activa el frenesí (RF-40)');
+  assert(p.colgantes.get('Right-0').araña.estado === Spider.ESTADOS.COLGANDO,
+    'y el puño ya no hace trepar: el frenesí tiene prioridad (RF-41)');
+
+  // Al soltar el puño el frenesí se apaga y la Fase 2 vuelve.
+  global.__ml5.detectStart.cb([manoAppEstirada, manoAppIzquierda]);
+  avanzar(20);
+  assert(p.poses.modos.frenzy === false, 'al abrir el puño el frenesí se apaga (RF-40)');
+  global.__ml5.detectStart.cb([]);
+  avanzar(20);
+
+  // RF-44 y RNF-12: las teclas de prueba sin mano.
+  const paletaAntes = p.poses.modos.palette;
+  p.key = '1';
+  p.keyPressed();
+  assert(p.poses.modos.palette === paletaAntes + 1, 'la tecla 1 cambia la paleta (RF-44)');
+  p.key = 'C';
+  p.keyPressed();
+  assert(p.poses.modos.palette === paletaAntes + 2, 'y la tecla C también (RNF-12)');
+  p.key = '2';
+  p.keyPressed();
+  assert(p.poses.modos.frenzy === true, 'la tecla 2 prende el frenesí (RF-44)');
+  p.key = '2';
+  p.keyPressed();
+  assert(p.poses.modos.frenzy === false, 'y lo vuelve a apagar');
+  p.key = 'R';
+  p.keyPressed();
+  assert(p.poses.modos.monster === true, 'la tecla R prende los monstruos (RNF-12)');
+  p.key = 'R';
+  p.keyPressed();
+  assert(p.poses.modos.monster === false, 'y lo vuelve a apagar');
+
+  // --- Fase 3 · Bloque 6: el color en el sketch (RF-45, 46, 49, 50) ---
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(10);
+  const manoAppPaz = { keypoints: aPuntos(manoFalsa([0.9, 0.1, 0.1, 0.9, 0.9])), handedness: 'Right' };
+  const paletaAntesSketch = p.poses.modos.palette;
+
+  p.key = '1';
+  p.keyPressed();
+  avanzar(2);
+  assert(p.poses.modos.palette === paletaAntesSketch + 1, 'la tecla 1 cambia la paleta (RF-44)');
+
+  const colganteColor = p.colgantes.get('Right-0');
+  assert(colganteColor.araña.colorObjetivo.nombre
+    === Paletas.paleta(p.poses.modos.palette).nombre,
+    'las arañas apuntan a la paleta nueva (RF-45)');
+  assert(colganteColor.tinte.r !== 226 || colganteColor.tinte.b !== 205,
+    'y el hilo ya lleva el tinte del acento (RF-49)');
+
+  for (let i = 0; i < 80; i++) avanzar(1);
+  assert(colganteColor.araña.color.nombre === Paletas.paleta(p.poses.modos.palette).nombre,
+    'al terminar la transición el color es el de la paleta nueva (RF-45)');
+
+  // RF-46: la paz cambia la paleta sola.
+  const paletaPazAntes = p.poses.modos.palette;
+  global.__ml5.detectStart.cb([manoAppPaz]);
+  avanzar(30);
+  assert(p.poses.poseDe('Right') === 'paz', 'el sketch detecta la paz (RF-38)');
+  assert(p.poses.modos.palette === paletaPazAntes + 1,
+    'y la paz avanza la paleta (RF-45)');
+
+  // --- Fase 3 · Bloque 7: audio base (RF-70 a RF-75) ---
+  // El sketch ya arrancó el audio con alguna tecla anterior (RF-70), así que el
+  // módulo se prueba desde cero.
+  Audio.reiniciar();
+  assert(Audio.activo() === false, 'el audio arranca apagado (RF-70)');
+  Audio.colorChime(0);
+  assert(Audio.activo() === false, 'y sin gesto no hace nada (RF-70)');
+
+  const audioIniciado = Audio.iniciar(p5Stub, null);
+  assert(audioIniciado === true, 'el audio arranca con el gesto del usuario (RF-70)');
+  assert(Audio.activo() === true, 'queda activo');
+  assert(!!Audio.limitador, 'la cadena tiene un limitador (RF-71)');
+  assert(Audio.estado() === 'activo', 'el estado es "activo" (RF-71)');
+
+  // RF-73: el chime usa osciladores creados una sola vez.
+  const iniciadosAntes = global.__audio.iniciados;
+  const chimesAntes = Audio.osciladoresChime.length;
+  Audio.colorChime(0);
+  Audio.colorChime(3);
+  assert(Audio.osciladoresChime.length === chimesAntes,
+    'el chime no crea osciladores nuevos (RF-73): ' + chimesAntes);
+  assert(global.__audio.iniciados === iniciadosAntes,
+    'ni arranca nodos nuevos (RF-73)');
+  assert(Audio.chimes === 2, 'y cuenta las campanitas: ' + Audio.chimes);
+  const frecuencia0 = Audio.osciladoresChime[0].frequency.ultimo;
+  Audio.colorChime(5);
+  assert(Audio.osciladoresChime[0].frequency.ultimo !== frecuencia0,
+    'el tono depende del índice de la paleta (RF-72)');
+
+  // RF-74: límite de voces simultáneas.
+  Audio.maxVoces = 4;
+  for (let i = 0; i < 10; i++) Audio.launch();
+  assert(Audio.vocesActivas() <= 4,
+    'los disparos no pasan del límite de voces (RF-74): ' + Audio.vocesActivas());
+
+  // RF-71: silencio y volumen.
+  Audio.toggleMute();
+  assert(Audio.estado() === 'silenciado', 'M silencia (RF-71)');
+  const vocesMudo = Audio.vocesActivas();
+  Audio.colorChime(1);
+  assert(Audio.vocesActivas() === vocesMudo, 'silenciado no dispara sonidos (RF-71)');
+  Audio.toggleMute();
+  Audio.setVolumen(0.3);
+  assert(Math.abs(Audio.volumen() - 0.3) < 0.001, 'el volumen maestro se aplica (RF-71)');
+  Audio.setVolumen(0.8);
+
+  // RF-72: los sonidos del puño de la Fase 2 (esconderse y salir).
+  const chimesPrevio = Audio.chimes;
+  Audio.hide();
+  Audio.launch();
+  assert(Audio.chimes === chimesPrevio, 'hide() y launch() no son campanitas');
+
+  // Y la campanita suena cuando el sketch cambia de paleta (RF-72).
+  Audio.reiniciar();
+  Audio.iniciar(p5Stub, null);
+  const chimesAntesSketch = Audio.chimes;
+  p.key = '1';
+  p.keyPressed();
+  avanzar(3);
+  assert(Audio.chimes === chimesAntesSketch + 1,
+    'el cambio de paleta suena (RF-72): ' + Audio.chimes);
+
+  // RF-43: el overlay de debug dibuja la pose y los modos sin romperse.
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  if (!p.enDebug()) {
+    p.key = 'd';
+    p.keyPressed();
+  }
+  p.textoCalls = 0;
+  avanzar(3);
+  assert(p.textoCalls > 0, 'el overlay escribe la pose y los modos (RF-43)');
+  p.key = 'd';
   p.keyPressed();
   }
 

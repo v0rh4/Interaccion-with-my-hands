@@ -90,6 +90,18 @@ class Spider {
     this.vx = 0;                  // impulso del lanzamiento (RF-15)
     this.vy = 0;
 
+    // --- Fase 3, Bloque 6: color (RF-45 a RF-50) ---
+    // Arranca con la paleta clásica: el aspecto de las fases anteriores.
+    this.color = Paletas.copia(Paletas.paleta(0));
+    this.colorObjetivo = this.color;
+    this.colorOrigen = this.color;
+    this.avanceColor = 1;        // 1 = transición terminada
+    this.retrasoColor = 0;       // segundos que faltan para empezar (RF-50)
+    this.transicionColor = 0.4;  // segundos que dura el lerp (RF-45)
+    this.haloCache = null;       // gradiente del halo (RNF-11)
+    this.haloColorCache = null;
+    this.brilloCache = null;     // gradiente del brillo especular (RNF-11)
+
     // Ojos rojos (RF-25): dos puntitos sobre el cefalotórax que brillan siempre,
     // aunque la luz de la escena esté lejos.
     this.ojos = [
@@ -224,6 +236,99 @@ class Spider {
     this.velocidad = Math.hypot(this.vx, this.vy) * 60;
     this.agitacion = Math.min(1.5, this.velocidad / VELOCIDAD_AGITACION);
     this.calcularPatas();
+  }
+
+  /**
+   * Apunta a una paleta nueva (RF-45). El cambio empieza después del retraso,
+   * que es lo que hace que las arañas cambien en onda y no todas juntas (RF-50).
+   *
+   * @param {object} paleta     paleta destino de palettes.js
+   * @param {number} retrasoMs  retraso propio de esta araña (0-150 ms según RF-50)
+   * @param {number} duracion   segundos que dura la transición (RF-45)
+   */
+  setPaleta(paleta, retrasoMs, duracion) {
+    if (!paleta) return;
+    this.colorObjetivo = Paletas.copia(paleta);
+    this.retrasoColor = Math.max(0, (retrasoMs || 0) / 1000);
+    if (duracion !== undefined) this.transicionColor = Math.max(0.05, duracion);
+    // Si no había transición en curso, el origen es el color actual.
+    if (this.avanceColor >= 1) this.colorOrigen = Paletas.copia(this.color);
+    this.avanceColor = 0;
+  }
+
+  /** Avanza la transición de color (RF-45). Se llama una vez por frame. */
+  actualizarColor(dt) {
+    const paso = Math.max(0, dt || 0);
+    if (this.retrasoColor > 0) {
+      this.retrasoColor = Math.max(0, this.retrasoColor - paso);
+      return;
+    }
+    if (this.avanceColor >= 1) return;
+
+    this.avanceColor = Math.min(1, this.avanceColor + paso / this.transicionColor);
+    this.color = Paletas.interpolar(this.colorOrigen, this.colorObjetivo, this.avanceColor);
+
+    if (this.avanceColor >= 1) {
+      this.color = Paletas.copia(this.colorObjetivo);
+    }
+  }
+
+  /** Tono de las patas, derivado del color del cuerpo (RF-48). */
+  tonoPata(factor) {
+    const c = this.color.cuerpo;
+    const f = (factor === undefined ? 1 : factor) * 2.1;
+    return [
+      Math.min(255, 18 + c[0] * f),
+      Math.min(255, 18 + c[1] * f),
+      Math.min(255, 24 + c[2] * f)
+    ];
+  }
+
+  /** El cefalotórax, un poco más claro que el abdomen (RF-48). */
+  tonoCefalotorax() {
+    const c = this.color.cuerpo;
+    return [
+      Math.min(255, c[0] + 8),
+      Math.min(255, c[1] + 8),
+      Math.min(255, c[2] + 8)
+    ];
+  }
+
+  /**
+   * Halo emisivo del color de la paleta (RF-48). El gradiente se cachea y sólo
+   * se rehace cuando cambia el color (RNF-11). Se ve más en la oscuridad: su
+   * alfa crece cuando el brillo que le da la linterna baja (se suma a RF-25).
+   */
+  dibujarHalo(p, escala) {
+    const halo = this.color.halo;
+    if (!halo || !p.drawingContext) return;
+
+    const a = Math.max(0, Math.min(1, this.opacidad));
+    if (a < 0.02) return;
+
+    const ctx = p.drawingContext;
+    if (!this.haloCache || !Paletas.iguales(this.haloColorCache, halo)) {
+      const r = Math.round(halo[0]);
+      const g = Math.round(halo[1]);
+      const b = Math.round(halo[2]);
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      grad.addColorStop(0, 'rgba(' + r + ',' + g + ',' + b + ',0.55)');
+      grad.addColorStop(0.55, 'rgba(' + r + ',' + g + ',' + b + ',0.16)');
+      grad.addColorStop(1, 'rgba(' + r + ',' + g + ',' + b + ',0)');
+      this.haloCache = grad;
+      this.haloColorCache = halo.slice();
+    }
+
+    const radio = this.rAbdomen * escala * 2.3;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.scale(radio, radio);
+    ctx.globalAlpha = Math.max(0, Math.min(1, (0.20 + 0.35 * (1 - this.brillo)) * a));
+    ctx.fillStyle = this.haloCache;
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   /** Ruido Perlin en [0,1]. Usa el de p5 si está disponible. */
@@ -364,6 +469,7 @@ class Spider {
     // opacidad del desvanecimiento pero sin el brillo: brillan siempre.
     const opacidad = Math.max(0, Math.min(1, this.opacidad * this.brillo));
 
+    this.dibujarHalo(p, escala);                  // halo emisivo (RF-48)
     this.dibujarPatas(p, -1, escala, opacidad);   // lado lejano, detrás del cuerpo
     this.dibujarCuerpo(p, escala, anchoCuerpo, vuelta, opacidad);
     this.dibujarPatas(p, 1, escala, opacidad);    // lado cercano, delante
@@ -391,7 +497,8 @@ class Spider {
       ojo.x = this.x + lx * cos - ly * sen;
       ojo.y = this.y + lx * sen + ly * cos;
 
-      p.fill(220, 40, 50, 240 * a);
+      const o = this.color.ojos;
+      p.fill(o[0], o[1], o[2], 240 * a);
       p.circle(ojo.x, ojo.y, ojo.radio * 2);
     }
   }
@@ -406,8 +513,8 @@ class Spider {
       if (pata.lado !== lado) continue;
 
       // El lado lejano se ve más apagado (está detrás del cuerpo).
-      const tono = lado > 0 ? 34 : 22;
-      p.stroke(tono, tono + 2, tono + 8, 240 * opacidad);
+      const tono = this.tonoPata(lado > 0 ? 1 : 0.72);
+      p.stroke(tono[0], tono[1], tono[2], 240 * opacidad);
       p.strokeWeight(1.9 * escala);
       p.line(pata.coxa.x, pata.coxa.y, pata.hueso.x, pata.hueso.y);
       p.strokeWeight(1.25 * escala);
@@ -417,7 +524,12 @@ class Spider {
 
       // Articulación: un brillo mínimo en la rodilla.
       p.noStroke();
-      p.fill(tono + 26, tono + 26, tono + 34, 220 * opacidad);
+      p.fill(
+        Math.min(255, tono[0] + 26),
+        Math.min(255, tono[1] + 26),
+        Math.min(255, tono[2] + 26),
+        220 * opacidad
+      );
       p.circle(pata.rodilla.x, pata.rodilla.y, 2.1 * escala);
     }
   }
@@ -436,9 +548,10 @@ class Spider {
     const rAbd = this.rAbdomen * escala;
     const rCef = this.rCefalo * escala;
 
-    // --- Abdomen: negro brillante ---
+    // --- Abdomen: el color del cuerpo de la paleta (RF-48) ---
+    const cuerpo = this.color.cuerpo;
     p.noStroke();
-    p.fill(12, 11, 16, 255 * opacidad);
+    p.fill(cuerpo[0], cuerpo[1], cuerpo[2], 255 * opacidad);
     p.push();
     p.translate(abdX, abdY);
     p.rotate(rot);
@@ -454,8 +567,9 @@ class Spider {
     }
 
     // --- Cefalotórax ---
+    const cef = this.tonoCefalotorax();
     p.noStroke();
-    p.fill(16, 15, 20, 255 * opacidad);
+    p.fill(cef[0], cef[1], cef[2], 255 * opacidad);
     p.push();
     p.translate(this.x, this.y);
     p.rotate(rot);
@@ -482,13 +596,14 @@ class Spider {
     const inf = [local(largo, -ancho), local(largo, ancho), local(0, 0)];
 
     // Halo suave alrededor de la marca.
+    const ac = this.color.acento;
     p.noStroke();
-    p.fill(196, 24, 46, 45 * a);
+    p.fill(ac[0] * 0.9, ac[1] * 0.9, ac[2] * 0.9, 45 * a);
     this.triangulo(p, sup);
     this.triangulo(p, inf);
 
     // La marca en sí.
-    p.fill(214, 32, 52, 235 * a);
+    p.fill(ac[0], ac[1], ac[2], 235 * a);
     this.triangulo(p, sup);
     this.triangulo(p, inf);
   }
@@ -510,14 +625,24 @@ class Spider {
     const hx = x - Math.cos(rot) * radio * 0.35;
     const hy = y - Math.sin(rot) * radio * 0.35;
 
+    // El gradiente es siempre el mismo: se cachea y se reposiciona con la
+    // transformación, así no se crea uno por frame (RNF-11).
+    if (!this.brilloCache) {
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, 'rgba(210, 225, 255, 0.42)');
+      g.addColorStop(0.45, 'rgba(150, 170, 210, 0.12)');
+      g.addColorStop(1, 'rgba(120, 140, 190, 0)');
+      this.brilloCache = g;
+    }
+
     ctx.save();
-    const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, radio);
-    g.addColorStop(0, 'rgba(210, 225, 255, ' + (0.42 * fuerza * a).toFixed(3) + ')');
-    g.addColorStop(0.45, 'rgba(150, 170, 210, ' + (0.12 * fuerza * a).toFixed(3) + ')');
-    g.addColorStop(1, 'rgba(120, 140, 190, 0)');
-    ctx.fillStyle = g;
+    ctx.translate(hx, hy);
+    ctx.rotate(rot);
+    ctx.scale(radio, radio * 0.72);
+    ctx.globalAlpha = Math.max(0, Math.min(1, fuerza * a));
+    ctx.fillStyle = this.brilloCache;
     ctx.beginPath();
-    ctx.ellipse(hx, hy, radio, radio * 0.72, rot, 0, Math.PI * 2);
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }

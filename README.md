@@ -10,6 +10,10 @@ se esconden en la palma; al abrir la mano salen disparadas y vuelven a colgar.
 Y la escena está a oscuras: una **linterna** sigue la palma y solo se ve lo que
 ella ilumina.
 
+En la Fase 3 aparecen las **poses**: con ✌️ (paz) las arañas cambian de color con
+una campanita, y un puño con la otra mano abierta es frenesí. Cada modo tiene su
+tecla para probarlo sin cámara.
+
 Todo es procedural: no hay modelos 3D, ni imágenes, ni archivos de audio. Cero
 build step, cero npm, cero backend.
 
@@ -47,6 +51,9 @@ Al abrirlo, el navegador pide permiso de cámara: **aceptalo**.
 | Ver los 21 keypoints y los valores de curl/velocidad | tecla `D` |
 | Prender/apagar la feature del puño | tecla `F` |
 | Prender/apagar la linterna | tecla `L` |
+| Cambiar de paleta (color) | ✌️ paz, o teclas `1` / `C` |
+| Frenesí / monstruos (banderas) | teclas `2`/`X` y `3`/`R` |
+| Silenciar y volumen | tecla `M` y `+` / `-` |
 | Activar el sonido | botón **ACTIVATE SOUND** (arriba a la derecha) |
 | Volumen general, efectos y ambiente | deslizadores del panel de audio |
 | Silenciar todo | casilla *Silenciar* |
@@ -81,6 +88,37 @@ Cada araña pasa por `HANGING → CLIMBING → HIDDEN → LAUNCHING → HANGING`
 
 Con la tecla `D` se ve, junto a la muñeca, si la mano está en **puño** y la
 **separación** de cada par de dedos (las telarañas de la Fase 2 la van a usar).
+
+## Poses, color y sonido (Fase 3)
+
+`poses.js` mira cada dedo (extendido por debajo de 0.35, doblado por encima de
+0.6, y la zona del medio mantiene lo que había) y reconoce:
+
+- **✌️ Paz** (índice y medio extendidos, anular y meñique doblados; el pulgar se
+  ignora): sostenida 250 ms, **cambia la paleta de color** de todas las arañas.
+  Si la mantenés, sigue ciclando cada 1 s. Al entrar suena una **campanita** de
+  tres notas, con el tono de la paleta.
+- **🤘 Rock** (índice y meñique extendidos): sostenida 300 ms, prende el **modo
+  monstruo** (la transformación visual llega en otro bloque; por ahora queda la
+  bandera y se ve en el overlay).
+- **Puño + la otra mano abierta**: 200 ms, activa el **frenesí**. Un puño solo o
+  dos puños **siguen comportándose como la Fase 2** (trepar y esconderse).
+
+Las paletas son las seis del spec: Clásica, Neón azul, Veneno, Oro, Violeta y
+Fantasma. El color se aplica al **cuerpo**, a la **marca del reloj de arena**, a
+los **ojos** y a un **halo emisivo** (que se ve más en la oscuridad), con una
+transición suave de 0.4 s y un retraso aleatorio de hasta 150 ms por araña, así
+el cambio llega **en onda** y no de golpe. El **hilo** se tiñe con un 30 % del
+color de acento.
+
+El audio (`audio.js`) se sintetiza todo con la Web Audio API sobre el contexto de
+p5.sound: **no hay archivos de audio**. Arranca recién con un gesto tuyo (el
+botón de sonido o cualquier tecla), tiene **limitador** para que no sature y los
+nodos se crean **una sola vez** (las campanitas son tres osciladores que se
+reusan). Con `M` silenciás y con `+`/`-` movés el volumen.
+
+Con `D` el overlay muestra, junto a cada muñeca, la **pose** detectada (y la
+candidata mientras se está sosteniendo) y los **modos** activos.
 
 ## Linterna y oscuridad (Fase 2)
 
@@ -134,6 +172,9 @@ index.html   CDNs, HUD, panel de audio
 sketch.js    orquestación: cámara, modelo, cuerdas, arañas, puño, luz, audio, render
 hand.js      keypoints, suavizado, curl, velocidad y apertura por mano
 gestures.js  puño (con histéresis) y separación entre dedos
+poses.js     poses (paz, rock), modos (color, frenesí, monstruo) y su prioridad
+palettes.js  las seis paletas de color y sus mezclas
+audio.js     sonidos procedurales de la Fase 3 (campanita, roce, pop)
 light.js     oscuridad, linterna que sigue la palma y viñeta
 rope.js      clase Rope: cuerda de seda con Verlet
 spider.js    clase Spider: cuerpo, ojos, marca roja, patas con IK y estados del puño
@@ -151,7 +192,10 @@ suavizado, cuánto se acorta el hilo al doblar un dedo, los umbrales de los
 sonidos, los del reconocedor de gestos (`CONFIG.gestos`: cuándo se considera
 puño, cuánto hay que sostenerlo y cuándo se abre una separación de dedos), los
 del puño (`CONFIG.puno`: velocidad de trepada, cuánto se acorta el hilo al
-llegar arriba, fuerza y escalonado del lanzamiento) y los de la linterna
+llegar arriba, fuerza y escalonado del lanzamiento), los de las poses y el color
+(`CONFIG.poses`: umbrales de dedo, tiempos de sostenimiento de cada pose, el
+cooldown y la duración de la transición de color y el retraso por araña) y los de
+la linterna
 (`CONFIG.luz`: `darkness`, `ambientLight`, `lightRadiusFactor`, `lightFlicker`,
 `vignetteStrength` y el piso de brillo de las arañas). El tamaño y los largos de
 las patas están en `spider.js`.

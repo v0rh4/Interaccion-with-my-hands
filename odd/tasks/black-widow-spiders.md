@@ -96,6 +96,18 @@ El usuario agregó el spec de la Fase 2 a `spec.md` **después** de aprobar la p
 - S61 — "RF-17: El estado de puño SHALL tener prioridad sobre el curl individual de RF-06." / "RF-18: Si la mano desaparece mientras las arañas están ocultas, SHALL aplicarse el comportamiento de RF-08 (caen y se desvanecen)."
 - S62 — Tareas 11-13 (§19): "Añadir los estados `HANGING/CLIMBING/HIDDEN/LAUNCHING` a `Spider`." / "Animación de trepada (patas alternadas, escala, hilo que se acorta)." / "Lanzamiento al abrir la mano con impulso escalonado y patas de susto." / "RNF-08: Cada feature SHALL poder activarse/desactivarse con una tecla para depurar: `F` (puño), `L` (linterna), `W` (telarañas)." (§13: "`gestures.js`... Se modifican solo lo necesario: `sketch.js`, `spider.js`, `hand.js`, `CONFIG`.")
 
+### Fase 3 — Bloques 5, 6 y 7: poses, colores y audio base (§22-§33, verbatim)
+
+- S72 — "RF-37: `poses.js` SHALL clasificar cada mano por dedo extendido (`curl < 0.35`) o doblado (`curl > 0.6`). La zona 0.35-0.6 mantiene el estado anterior (histéresis)."
+- S73 — "RF-38: **PAZ**: índice y medio extendidos, anular y meñique doblados, pulgar ignorado. Debe sostenerse 250 ms." / "RF-39: **ROCK**: índice y meñique extendidos, medio y anular doblados, pulgar ignorado. Debe sostenerse 300 ms. Se pierde si deja de cumplirse por 300 ms."
+- S74 — "RF-40: **FRENESÍ**: una mano en puño (RF-11/12 de Fase 2) y la otra mano visible y NO en puño. Debe sostenerse 200 ms." / "RF-41: una sola mano visible en puño, o dos manos en puño, SHALL conservar el comportamiento de Fase 2 (trepar y esconderse). Solo "puño + otra mano no-puño" activa el frenesí."
+- S75 — "RF-42: Los modos son banderas independientes: `palette` (índice actual), `frenzy` (bool), `monster` (bool)." / "RF-43: overlay de debug (tecla `D`) con la pose por mano y los modos activos." / "RF-44: Teclas para probar sin mano: `1` cambia color, `2` alterna frenesí, `3` alterna monstruos."
+- S76 — "RF-45: Al entrar en PAZ, SHALL pasar a la siguiente paleta de `palettes.js` con transición suave de ~0.4 s (lerp de color, no corte brusco)." / "RF-46: Si PAZ se mantiene más de 1 s, SHALL seguir cambiando a la siguiente paleta cada 1 s. Cooldown mínimo entre cambios: 600 ms."
+- S77 — "RF-47: Paletas (cuerpo / acento del reloj de arena / ojos / brillo): Clásica, Neón azul, Veneno, Oro, Violeta, Fantasma." / "RF-48: El color SHALL aplicarse al cuerpo, a la marca de reloj de arena, a los ojos y a un halo emisivo (gradiente radial cacheado)." / "RF-49: El hilo de seda SHALL teñirse con un 30 % del color de acento." / "RF-50: Cada araña SHALL cambiar con un retraso aleatorio de 0 a 150 ms (onda, no simultáneo)." / "RF-51: La paleta elegida SHALL persistir en los demás modos (excepto monstruos, ver RF-69)."
+- S78 — "RF-70: El navegador bloquea el audio hasta que haya una interacción del usuario… llamar `userStartAudio()` con el primer clic o tecla." / "RF-71: Tecla `M` para silenciar o activar el sonido y `+`/`-` para el volumen maestro. Debe existir un limitador para que nunca sature."
+- S79 — "RF-72 … | **Paz / cambio de color** | Campanita cristalina de 2-3 notas ascendentes (senoidales con envolvente corta). El tono depende del índice de la paleta. |" / "RF-73: Los sonidos SHALL crearse una sola vez (osciladores y filtros reutilizados). No crear nodos de audio nuevos por frame." / "RF-74: … SHALL tener un límite de voces (máx. 4 simultáneos)." / "RF-75: `audio.js` SHALL exponer una API simple: `Audio.colorChime(i)`, …, `Audio.hide()`, `Audio.launch()`."
+- S80 — "RNF-11: Cachear gradientes de halo y de ojos. No crear objetos por frame." / "RNF-12: Cada feature con su tecla de depuración: `C` (color), `X` (frenesí), `R` (monstruos), `M` (sonido)." / §29: "`peaceHoldMs`, `rockHoldMs`, `frenzyHoldMs`, `colorCooldown`, `colorTransition`, … `masterVolume`." / Tareas 21 a 26 de §31.
+
 ### Bloque 3 — Linterna y viñeta (§15 y §19, verbatim)
 
 - S63 — "RF-19: El video SHALL oscurecerse y desaturarse (tinte frío verdoso/azulado). Usar `drawingContext.filter` si está disponible y `tint()` como alternativa (Safari no soporta `filter`)."
@@ -128,6 +140,9 @@ El usuario agregó el spec de la Fase 2 a `spec.md` **después** de aprobar la p
 | T14 | S55-S58, S62 | Fase 2 · Bloque 1 real: `gestures.js` (`isFist` con histéresis + `spreadValue`) y overlay de debug | inline | hecho y verificado | 2737a9f, d329ad6, 79fb4d2 |
 | T15 | S59-S62 | Fase 2 · Bloque 2 real: estados `HANGING/CLIMBING/HIDDEN/LAUNCHING`, trepada y lanzamiento escalonado | inline | hecho y verificado | 2737a9f, d329ad6, 79fb4d2 |
 | T16 | S63-S71 | Fase 2 · Bloque 3: `light.js` (oscuridad, linterna en la palma, viñeta), tinte del video, brillo por distancia y ojos rojos | inline | hecho y verificado | c21f153, be05393 |
+| T17 | S72-S75, S80 | Fase 3 · Bloque 5 (tareas 21-22): `poses.js` (paz, rock, frenesí) + la regla de prioridad de puños + overlay y teclas de modo | inline | hecho y verificado | (pendiente) |
+| T18 | S76, S77, S80 | Fase 3 · Bloque 6 (tareas 23-24): `palettes.js`, color de cuerpo/marca/ojos con lerp, halo cacheado, tinte del hilo y cambio en onda | inline | hecho y verificado | (pendiente) |
+| T19 | S78, S79 | Fase 3 · Bloque 7 (tareas 25-26): `audio.js` (arranque por gesto, mute, volumen, limitador) y la campanita del cambio de color | inline | hecho y verificado | (pendiente) |
 
 Nota de numeración: el usuario numera esta fase como "tareas 10 a 13" (Bloque 1 = gestos, Bloque 2 = puño). En este documento las tareas 10 y 11 ya estaban tomadas por el audio y el README, así que la fase 2 queda como T12 y T13.
 
