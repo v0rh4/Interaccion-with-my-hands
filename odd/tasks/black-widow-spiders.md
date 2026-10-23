@@ -140,9 +140,9 @@ El usuario agregó el spec de la Fase 2 a `spec.md` **después** de aprobar la p
 | T14 | S55-S58, S62 | Fase 2 · Bloque 1 real: `gestures.js` (`isFist` con histéresis + `spreadValue`) y overlay de debug | inline | hecho y verificado | 2737a9f, d329ad6, 79fb4d2 |
 | T15 | S59-S62 | Fase 2 · Bloque 2 real: estados `HANGING/CLIMBING/HIDDEN/LAUNCHING`, trepada y lanzamiento escalonado | inline | hecho y verificado | 2737a9f, d329ad6, 79fb4d2 |
 | T16 | S63-S71 | Fase 2 · Bloque 3: `light.js` (oscuridad, linterna en la palma, viñeta), tinte del video, brillo por distancia y ojos rojos | inline | hecho y verificado | c21f153, be05393 |
-| T17 | S72-S75, S80 | Fase 3 · Bloque 5 (tareas 21-22): `poses.js` (paz, rock, frenesí) + la regla de prioridad de puños + overlay y teclas de modo | inline | hecho y verificado | (pendiente) |
-| T18 | S76, S77, S80 | Fase 3 · Bloque 6 (tareas 23-24): `palettes.js`, color de cuerpo/marca/ojos con lerp, halo cacheado, tinte del hilo y cambio en onda | inline | hecho y verificado | (pendiente) |
-| T19 | S78, S79 | Fase 3 · Bloque 7 (tareas 25-26): `audio.js` (arranque por gesto, mute, volumen, limitador) y la campanita del cambio de color | inline | hecho y verificado | (pendiente) |
+| T17 | S72-S75, S80 | Fase 3 · Bloque 5 (tareas 21-22): `poses.js` (paz, rock, frenesí) + la regla de prioridad de puños + overlay y teclas de modo | inline | hecho y verificado | aa705c2 |
+| T18 | S76, S77, S80 | Fase 3 · Bloque 6 (tareas 23-24): `palettes.js`, color de cuerpo/marca/ojos con lerp, halo cacheado, tinte del hilo y cambio en onda | inline | hecho y verificado | aa705c2 |
+| T19 | S78, S79 | Fase 3 · Bloque 7 (tareas 25-26): `audio.js` (arranque por gesto, mute, volumen, limitador) y la campanita del cambio de color | inline | hecho y verificado | aa705c2 |
 
 Nota de numeración: el usuario numera esta fase como "tareas 10 a 13" (Bloque 1 = gestos, Bloque 2 = puño). En este documento las tareas 10 y 11 ya estaban tomadas por el audio y el README, así que la fase 2 queda como T12 y T13.
 
