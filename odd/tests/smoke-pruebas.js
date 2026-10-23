@@ -299,6 +299,43 @@
   assert(detector2.isFist(manoIntermitente) === false,
     'un frame suelto por encima del umbral no confirma el puño (el contador se reinicia)');
 
+  // Bordes del umbral: exactamente 0.75 no alcanza, apenas por encima sí, y el
+  // pulgar no influye (RF-11).
+  const detectorBordes = Gestos.crear();
+  const manoBorde = gestosMano([0, 0.75, 0.75, 0.75, 0.75], 'Right');
+  for (let i = 0; i < 20; i++) detectorBordes.actualizar([manoBorde], 0.016, CFG_GESTOS);
+  assert(detectorBordes.isFist(manoBorde) === false,
+    'con el curl exactamente en 0.75 el puño no se confirma (el umbral es estricto)');
+
+  const detectorJusto = Gestos.crear();
+  const manoJusto = gestosMano([0, 0.76, 0.76, 0.76, 0.76], 'Right');
+  for (let i = 0; i < 20; i++) detectorJusto.actualizar([manoJusto], 0.016, CFG_GESTOS);
+  assert(detectorJusto.isFist(manoJusto) === true,
+    'apenas por encima de 0.75, sostenido, el puño se confirma');
+
+  const detectorPulgar = Gestos.crear();
+  const manoPulgarEstirado = gestosMano([1, 0.9, 0.9, 0.9, 0.9], 'Right');
+  for (let i = 0; i < 20; i++) detectorPulgar.actualizar([manoPulgarEstirado], 0.016, CFG_GESTOS);
+  assert(detectorPulgar.isFist(manoPulgarEstirado) === true,
+    'el pulgar se ignora: da igual si está estirado o cerrado (RF-11)');
+
+  const detectorSinPuno = Gestos.crear();
+  const manoDedosEstirados = gestosMano([1, 0.2, 0.2, 0.2, 0.2], 'Right');
+  for (let i = 0; i < 20; i++) detectorSinPuno.actualizar([manoDedosEstirados], 0.016, CFG_GESTOS);
+  assert(detectorSinPuno.isFist(manoDedosEstirados) === false,
+    'con los cuatro dedos largos estirados (y el pulgar cerrado) no hay puño');
+
+  // La histéresis se mide en tiempo real: a 30 FPS hacen falta los mismos
+  // 150 ms, o sea la mitad de frames que a 60 FPS (RF-12).
+  const detector30 = Gestos.crear();
+  const mano30 = gestosMano([0, 0.9, 0.9, 0.9, 0.9], 'Left');
+  for (let i = 0; i < 4; i++) detector30.actualizar([mano30], 0.0333, CFG_GESTOS);
+  assert(detector30.isFist(mano30) === false,
+    'a 30 FPS, 4 frames (133 ms) todavía no confirman el puño');
+  detector30.actualizar([mano30], 0.0333, CFG_GESTOS);
+  assert(detector30.isFist(mano30) === true,
+    'a 30 FPS, 5 frames (167 ms) ya lo confirman: el umbral es de tiempo, no de frames');
+
   // spreadValue: distancia entre dos puntas normalizada por el tamaño de la mano.
   const puntosSeparados = manoFalsa([0, 0, 0, 0, 0]);
   const tamanoMano = Math.hypot(
@@ -480,10 +517,22 @@
     'el hilo se acorta mientras trepa: ' + Math.round(largoColgada) + ' → '
     + Math.round(trepando.cuerda.longitud) + ' px');
 
-  avanzar(90);
-  const escondida = p.colgantes.get('Right-0');
-  assert(escondida.araña.estado === Spider.ESTADOS.OCULTA,
-    'al llegar a la palma la araña queda HIDDEN');
+  // Se espera a que TODAS lleguen a la palma (cada una trepa a su ritmo ±20 %,
+  // RF-13), así la prueba del lanzamiento no depende de los tiempos.
+  let todasOcultas = false;
+  let framesEsperados = 0;
+  while (!todasOcultas && framesEsperados < 300) {
+    avanzar(1);
+    framesEsperados++;
+    const colgantesAhora = Array.from(p.colgantes.values());
+    todasOcultas = colgantesAhora.length === 5
+      && colgantesAhora.every((c) => c.araña.estado === Spider.ESTADOS.OCULTA);
+  }
+  assert(todasOcultas,
+    'las 5 arañas de la mano llegan a la palma y quedan escondidas (RF-14) en '
+    + framesEsperados + ' frames');
+  assert(framesEsperados > 1, 'y no llegan todas en el mismo frame (cada una trepa a su ritmo)');
+
   p.hiloCalls = 0;
   p.ellipseCalls = 0;
   p.draw();
@@ -492,7 +541,22 @@
 
   // --- Fase 2 · Bloque 2: al abrir la mano salen disparadas y vuelven a colgar ---
   global.__ml5.detectStart.cb([manoAppEstirada]);
-  avanzar(40);   // más que el retraso escalonado máximo (250 ms)
+  // Se registra en qué frame sale cada araña: la salida tiene que ser
+  // escalonada (RF-15) y no todas en el mismo frame.
+  const framesDeSalida = new Map();
+  for (let i = 0; i < 40; i++) {
+    p.frameCount++;
+    p.draw();
+    for (const [clave, colgante] of p.colgantes) {
+      if (colgante.araña.estado === Spider.ESTADOS.LANZANDO && !framesDeSalida.has(clave)) {
+        framesDeSalida.set(clave, i);
+      }
+    }
+  }
+  assert(framesDeSalida.size === 5, 'las 5 arañas salen del escondite al abrir la mano');
+  assert(new Set(Array.from(framesDeSalida.values())).size > 1,
+    'no salen todas en el mismo frame: la salida está escalonada (RF-15)');
+
   const lanzada = p.colgantes.get('Right-0');
   assert(lanzada.araña.estado === Spider.ESTADOS.LANZANDO || lanzada.araña.estado === Spider.ESTADOS.COLGANDO,
     'al abrir la mano la araña sale del escondite: ' + lanzada.araña.estado);

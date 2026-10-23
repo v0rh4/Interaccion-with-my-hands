@@ -87,7 +87,6 @@ class Spider {
     this.susto = 0;               // 0..1: patas abiertas al lanzarse (RF-16)
     this.vx = 0;                  // impulso del lanzamiento (RF-15)
     this.vy = 0;
-    this.defensa = 0;             // 0..1: postura defensiva (Fase 2, Bloque 2)
 
     // Estado de cada pata: coxa, inicio de fémur, rodilla y pie.
     this.patas = [];
@@ -110,17 +109,12 @@ class Spider {
    * @param {{x:number,y:number}} ropeEnd  punto libre de la cuerda (donde cuelga)
    * @param {number} angle                  ángulo del último segmento de la cuerda
    * @param {number} speed                  velocidad de la punta en px/s
-   * @param {number} [defensa]              0..1: postura defensiva (Fase 2)
    */
-  update(ropeEnd, angle, speed, defensa) {
+  update(ropeEnd, angle, speed) {
     this.tiempo += 1 / 60;
     this.x = ropeEnd.x;
     this.y = ropeEnd.y;
     this.velocidad = speed || 0;
-
-    // Postura defensiva: con el puño cerrado las patas se recogen contra el
-    // cuerpo y el pataleo se calma (Fase 2, Bloque 2).
-    this.defensa = Math.max(0, Math.min(1, defensa || 0));
 
     // La cabeza mira hacia el hilo: el ángulo de la cuerda apunta hacia abajo,
     // así que hacia el ancla va el ángulo + PI (spec.md §6, S20).
