@@ -103,7 +103,8 @@ class Light {
 
     const paso = Math.max(0.0001, Math.min(dt || 0.016, 0.25));
     this.tiempo += paso;
-    this.oscuro = cfg.darkness;
+    // RF-24: la oscuridad nunca tapa más de lo que deja la luz ambiental mínima.
+    this.oscuro = Math.min(cfg.darkness, 1 - cfg.ambientLight);
     this.vinetaFuerza = cfg.vignetteStrength;
 
     // Un foco por mano, en la palma y con el radio según el tamaño y la apertura.
@@ -186,31 +187,33 @@ class Light {
     g.fill(0, 0, 0, 255 * this.oscuro);
     g.rect(0, 0, g.width, g.height);
 
-    if (this.focos.length === 0 || this.intensidad <= 0.01) return;
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.globalAlpha = Math.max(0, Math.min(1, this.intensidad * this.parpadeo));
-
-    for (const foco of this.focos) {
-      const radio = Math.max(1, foco.radio * this.parpadeo);
-      if (!this.gradienteFoco) this.gradienteFoco = this.crearGradienteFoco(ctx);
-      // Gradiente unitario + transformación: no se crea uno por frame (RNF-07).
+    if (this.focos.length > 0 && this.intensidad > 0.01) {
       ctx.save();
-      ctx.translate(foco.x, foco.y);
-      ctx.scale(radio, radio);
-      ctx.fillStyle = this.gradienteFoco;
-      ctx.beginPath();
-      ctx.arc(0, 0, 1, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.globalAlpha = Math.max(0, Math.min(1, this.intensidad * this.parpadeo));
+
+      for (const foco of this.focos) {
+        const radio = Math.max(1, foco.radio * this.parpadeo);
+        if (!this.gradienteFoco) this.gradienteFoco = this.crearGradienteFoco(ctx);
+        // Gradiente unitario + transformación: no se crea uno por frame (RNF-07).
+        ctx.save();
+        ctx.translate(foco.x, foco.y);
+        ctx.scale(radio, radio);
+        ctx.fillStyle = this.gradienteFoco;
+        ctx.beginPath();
+        ctx.arc(0, 0, 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
       ctx.restore();
     }
 
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
-    ctx.restore();
-
-    // Y la capa se dibuja sobre el video (RF-20).
+    // La capa se compone SIEMPRE, con agujeros o sin ellos: si no hay manos la
+    // oscuridad tiene que seguir tapando el video hasta la luz ambiental
+    // (RF-20, RF-24 y RF-27).
     p.image(g, 0, 0);
   }
 

@@ -791,6 +791,71 @@
   avanzar(2);
   assert(p.luz.activada === true, 'la tecla L la vuelve a prender (RNF-08)');
   assert(p.luz.capa.registro.length > 0, 'y la oscuridad se vuelve a dibujar');
+
+  // --- Fase 2 · Bloque 3: regresión de la verificación independiente ---
+  // S68 (RF-24/RF-27): sin manos la oscuridad TIENE que seguir tapando el video
+  // hasta la luz ambiental, no sólo teñirlo.
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(20);
+  global.__ml5.detectStart.cb([]);
+  let framesSinManos = 0;
+  while (p.luz.intensidad > 0.01 && framesSinManos < 400) {
+    avanzar(1);
+    framesSinManos++;
+  }
+  p.registro.length = 0;
+  p.draw();
+  const imgsSinManos = p.registro.filter((c) => c.op === 'image').length;
+  assert(imgsSinManos >= 2,
+    'sin manos la capa de oscuridad sigue sobre el video (imgs=' + imgsSinManos + ')');
+
+  const capaSinManos = p.luz.asegurarCapa(p);
+  capaSinManos.registro.length = 0;
+  p.luz.dibujar(p);
+  const rellenoSinManos = capaSinManos.registro.filter((c) => c.op === 'fill' && c.args[3] > 0)[0];
+  assert(!!rellenoSinManos && Math.abs(rellenoSinManos.args[3] - 255 * (1 - CONFIG.luz.ambientLight)) < 1,
+    'sin manos la oscuridad deja la luz ambiental (1 - ambientLight): '
+    + (rellenoSinManos ? rellenoSinManos.args[3].toFixed(1) : '?'));
+
+  // S65: dos manos, dos agujeros en lugares distintos.
+  global.__ml5.detectStart.cb([
+    { keypoints: aPuntos(manoFalsa([0, 0, 0, 0, 0])), handedness: 'Right' },
+    { keypoints: aPuntos(manoFalsa([0, 0, 0, 0, 0], 120)), handedness: 'Left' }
+  ]);
+  avanzar(20);
+  assert(p.luz.focos.length === 2, 'con dos manos hay dos focos (RF-21)');
+  assert(Math.abs(p.luz.focos[0].x - p.luz.focos[1].x) > 30,
+    'los dos focos están en palmas distintas (RF-21)');
+  const capaDosManos = p.luz.asegurarCapa(p);
+  capaDosManos.registro.length = 0;
+  p.luz.dibujar(p);
+  assert(capaDosManos.registro.filter((c) => c.op === 'arc').length === 2,
+    'y se abren dos agujeros de luz (RF-21)');
+
+  // RNF-07: la escena no crea gradientes ni p5.Graphics por frame.
+  const focoAntes = p.luz.gradienteFoco;
+  const vinetaAntes = p.luz.vineta;
+  const graficosAntesFrame = p.graphicsCreados;
+  p.luz.capa.registro.length = 0;
+  avanzar(8);
+  assert(!p.luz.capa.registro.some((c) => c.op === 'gradiente'),
+    'el foco no crea un gradiente por frame (RNF-07)');
+  assert(p.luz.gradienteFoco === focoAntes, 'el gradiente del foco se reutiliza (RNF-07)');
+  assert(p.luz.vineta === vinetaAntes, 'la viñeta no se recrea por frame (RNF-07)');
+  assert(p.graphicsCreados === graficosAntesFrame, 'no se crean p5.Graphics por frame (RNF-07)');
+
+  // RNF-08: con la linterna apagada vuelve el oscurecido simple de la Fase 1.
+  p.key = 'l';
+  p.keyPressed();
+  p.registro.length = 0;
+  p.draw();
+  assert(p.registro.filter((c) => c.op === 'image').length === 1,
+    'con la linterna apagada sólo se dibuja el video (RNF-08)');
+  assert(p.registro.some((c) => c.op === 'fill' && c.args[0] === 4 && c.args[1] === 2
+    && c.args[2] === 6 && c.args[3] === 200),
+    'y se conserva el oscurecido de la Fase 1 (RNF-08)');
+  p.key = 'l';
+  p.keyPressed();
   }
 
   // --- T9/T10: audio procedural ---
