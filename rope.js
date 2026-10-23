@@ -26,6 +26,8 @@ class Rope {
     this.puntos = [];
     this.anclada = true;   // si está suelta, la cuerda cae libre (T8)
     this.saltoMaximo = 60; // teletransporte del ancla: la cuerda la acompaña
+    // Brillo que le pone la luz de la escena (RF-25). 1 = a plena luz.
+    this.brillo = 1;
     this.reiniciar(x, y);
   }
 
@@ -176,7 +178,9 @@ class Rope {
    */
   dibujar(p, color, opacidad, halo) {
     const tono = color || { r: 226, g: 220, b: 205 };
-    const a = opacidad === undefined ? 1 : Math.max(0, Math.min(1, opacidad));
+    // RF-25: el brillo lo pone la luz de la escena (la opacidad es del fade).
+    const base = (opacidad === undefined ? 1 : opacidad) * this.brillo;
+    const a = Math.max(0, Math.min(1, base));
     const conHalo = halo === undefined ? Rope.haloActivado : halo;
 
     p.noFill();

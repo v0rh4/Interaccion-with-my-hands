@@ -72,6 +72,15 @@ const CONFIG = {
     vueloMinimo: 0.12,
     launchDuracion: 1.4        // tope de seguridad del vuelo, en segundos
   },
+  luz: {
+    // Fase 2 · Bloque 3: oscuridad, linterna y viñeta (spec §17).
+    darkness: 0.9,           // opacidad de la capa de oscuridad (RF-20, 88-92 %)
+    ambientLight: 0.1,       // luz ambiental mínima que deja pasar (RF-24)
+    lightRadiusFactor: 1.5,  // radio de la linterna = tamaño de la mano × esto (RF-22)
+    lightFlicker: 0.06,      // parpadeo del radio y la intensidad (RF-23, ±6 %)
+    vignetteStrength: 0.62,  // fuerza de la viñeta de los bordes (RF-26)
+    brilloMinimo: 0.35       // piso de brillo de arañas e hilos lejos de la luz (RF-25)
+  },
   audio: {
     umbralCreak: 200,    // px/s para que un dedo enseñe la seda
     umbralSkitter: 900,  // px/s para el pataleo rápido
@@ -100,7 +109,6 @@ const esquema = (p) => {
   let ultimoMedidoFps = 0;
   let calidadReducida = false;
   let pistaOculta = false;
-  let vineta = null;
 
   const seguimiento = new Mano.Seguimiento();  // suavizado, curl y velocidad
   const gestos = Gestos.crear();                // puño y separación (Fase 2)
@@ -111,6 +119,7 @@ const esquema = (p) => {
   const faseAraña = [0, 0, 0, 0, 0];           // fase de animación propia por dedo (RF-10)
 
   const sonido = new SoundManager();            // audio procedural (spec §15)
+  const luz = new Light(p);                    // oscuridad y linterna (Fase 2, Bloque 3)
   const eventos = {                             // estado para disparar sonidos
     manosPrevias: 0,
     apertura: 0
@@ -137,6 +146,7 @@ const esquema = (p) => {
     // Sonda para los tests automatizados: expone el estado de los colgantes.
     p.colgantes = colgantes;
     p.seguimiento = seguimiento;
+    p.luz = luz;
 
     // Cada dedo con su propio largo de hilo, tamaño y fase (RF-10).
     for (let i = 0; i < variacionHilo.length; i++) {
@@ -187,8 +197,14 @@ const esquema = (p) => {
     actualizarColgantes(manos, dt);
     actualizarSonido(manos, gestosManos);
 
+    // Fase 2, Bloque 3: la linterna sigue las palmas y modula el brillo de la
+    // escena (RF-21 a RF-25).
+    luz.actualizar(manos, dt, CONFIG.luz);
+    actualizarBrillo();
+
     dibujarFondo(p);
-    dibujarVineta(p);
+    luz.dibujar(p);        // oscuridad + agujeros de luz (RF-20, RF-21)
+    luz.dibujarVineta(p);  // viñeta cacheada (RF-26)
     dibujarColgantes(p);
     if (mostrarDebug) dibujarDebug(p, manos);
     actualizarInfo(p, manos);
@@ -199,11 +215,13 @@ const esquema = (p) => {
     if (p.key === 'd' || p.key === 'D') mostrarDebug = !mostrarDebug;
     // F prende y apaga la feature del puño (RNF-08).
     if (p.key === 'f' || p.key === 'F') featurePuno = !featurePuno;
+    // L prende y apaga la linterna (RNF-08).
+    if (p.key === 'l' || p.key === 'L') luz.activada = !luz.activada;
   };
 
   p.windowResized = () => {
+    // La capa de luz se rehace sola al detectar el tamaño nuevo (RNF-07).
     p.resizeCanvas(p.windowWidth, p.windowHeight);
-    vineta = null;
   };
 
   // ---------------------------------------------------------------- modelo ---
@@ -373,6 +391,8 @@ const esquema = (p) => {
               colgante.espera = undefined;
               colgante.tiempoLanzamiento = 0;
               colgante.sonarLanzamiento = true;
+              // RF-23: el lanzamiento hace parpadear más fuerte la linterna.
+              luz.impulsar();
             }
           }
         } else if (araña.estado === Spider.ESTADOS.LANZANDO) {
@@ -592,7 +612,7 @@ const esquema = (p) => {
     // Tensión de la telaraña: sigue la apertura de los dedos (promediada).
     if (manos.length > 0) {
       let apertura = 0;
-      for (const mano of manos) apertura += calcularApertura(mano);
+      for (const mano of manos) apertura += Mano.calcularApertura(mano.puntos);
       sonido.tensionTela(apertura / manos.length);
     } else {
       sonido.tensionTela(0);
@@ -608,24 +628,17 @@ const esquema = (p) => {
   }
 
   /**
-   * Qué tan abiertos están los dedos: 0 = puño, 1 = mano abierta.
-   * Se mide la distancia media entre puntas vecinas, dividida por el largo de
-   * la mano (muñeca → nudillo del medio), así no depende de la escala.
+   * Brillo de cada araña y de su hilo según la distancia a la linterna (RF-25).
+   * Los ojos rojos no se atenúan: eso lo maneja Spider por dentro.
    */
-  function calcularApertura(mano) {
-    const tips = mano.puntas;
-    const muneca = mano.puntos[0];
-    const nudillo = mano.puntos[9];
-    if (!muneca || !nudillo || tips.length < 2) return 0;
-
-    const referencia = Math.hypot(nudillo.x - muneca.x, nudillo.y - muneca.y) || 1;
-    let suma = 0;
-    for (let i = 1; i < tips.length; i++) {
-      suma += Math.hypot(tips[i].x - tips[i - 1].x, tips[i].y - tips[i - 1].y);
+  function actualizarBrillo() {
+    for (const colgante of colgantes.values()) {
+      const factor = luz.activada
+        ? luz.intensidadEn(colgante.araña.x, colgante.araña.y, CONFIG.luz.brilloMinimo)
+        : 1;
+      colgante.araña.brillo = factor;
+      colgante.cuerda.brillo = factor;
     }
-    const medio = suma / (tips.length - 1) / referencia;
-    // Empírico: ~0.3 con el puño cerrado y ~0.8 con la mano abierta.
-    return Math.max(0, Math.min(1, (medio - 0.4) / 0.45));
   }
 
   // --------------------------------------------------------------- render ---
@@ -635,34 +648,24 @@ const esquema = (p) => {
     p2.translate(p2.width, 0);
     p2.scale(-1, 1); // espejo horizontal (RF-01)
     if (video && video.elt && video.elt.readyState >= 2) {
-      p2.image(video, 0, 0, p2.width, p2.height);
+      if (luz.activada) {
+        // RF-19: el video se oscurece, se desatura y se tiñe en frío.
+        luz.dibujarVideo(p2, video);
+      } else {
+        p2.image(video, 0, 0, p2.width, p2.height);
+      }
     } else {
       p2.background(6, 5, 9);
     }
     p2.pop();
 
-    // Oscurecer el video de fondo (RF-01).
-    p2.noStroke();
-    p2.fill(4, 2, 6, 200);
-    p2.rect(0, 0, p2.width, p2.height);
-  }
-
-  /** Viñeta: oscurece los bordes para el clima de instalación (T9). */
-  function dibujarVineta(p2) {
-    if (!p2.drawingContext) return;
-    const ctx = p2.drawingContext;
-    if (!vineta || vineta.w !== p2.width || vineta.h !== p2.height) {
-      const radio = Math.min(p2.width, p2.height) * 0.34;
-      const grad = ctx.createRadialGradient(
-        p2.width / 2, p2.height / 2, radio,
-        p2.width / 2, p2.height / 2, Math.max(p2.width, p2.height) * 0.78
-      );
-      grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-      grad.addColorStop(1, 'rgba(0, 0, 0, 0.62)');
-      vineta = { w: p2.width, h: p2.height, grad: grad };
+    // Con la linterna prendida la oscuridad la pone su capa (RF-20); apagada se
+    // mantiene el oscurecido simple de la Fase 1 (RF-01).
+    if (!luz.activada) {
+      p2.noStroke();
+      p2.fill(4, 2, 6, 200);
+      p2.rect(0, 0, p2.width, p2.height);
     }
-    ctx.fillStyle = vineta.grad;
-    ctx.fillRect(0, 0, p2.width, p2.height);
   }
 
   function dibujarColgantes(p2) {

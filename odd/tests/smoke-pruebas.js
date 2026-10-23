@@ -427,6 +427,144 @@
   arañaEstados.draw(p5Stub);
   assert(p5Stub.ellipseCalls > 0, 'la araña que volvió a colgar se dibuja de nuevo');
 
+  // --- Fase 2 · Bloque 3: linterna, oscuridad y viñeta (tareas 14-16) ---
+  const CFG_LUZ = {
+    darkness: 0.9,
+    ambientLight: 0.1,
+    lightRadiusFactor: 1.5,
+    lightFlicker: 0.06,
+    vignetteStrength: 0.62
+  };
+
+  const luz = new Light();
+  const graficosAntes = p5Stub.graphicsCreados || 0;
+  const capaUno = luz.asegurarCapa(p5Stub);
+  const capaDos = luz.asegurarCapa(p5Stub);
+  assert(capaUno === capaDos, 'la capa de oscuridad se reutiliza entre frames (RF-20, RNF-07)');
+  assert(p5Stub.graphicsCreados === graficosAntes + 1,
+    'la capa se creó una sola vez: +' + (p5Stub.graphicsCreados - graficosAntes));
+
+  // RF-21: el foco está en la palma (promedio de los keypoints 0, 5, 9 y 17).
+  const puntosAbiertos = manoFalsa([0, 0, 0, 0, 0]);
+  const manoLuz = {
+    handedness: 'Right',
+    puntos: puntosAbiertos,
+    curl: Mano.calcularCurl(puntosAbiertos)
+  };
+  const palmaLuz = {
+    x: (puntosAbiertos[0].x + puntosAbiertos[5].x + puntosAbiertos[9].x + puntosAbiertos[17].x) / 4,
+    y: (puntosAbiertos[0].y + puntosAbiertos[5].y + puntosAbiertos[9].y + puntosAbiertos[17].y) / 4
+  };
+  const tamanoLuz = Math.hypot(
+    puntosAbiertos[9].x - puntosAbiertos[0].x,
+    puntosAbiertos[9].y - puntosAbiertos[0].y
+  );
+
+  luz.actualizar([manoLuz], 0.016, CFG_LUZ);
+  assert(luz.focos.length === 1, 'con una mano hay un foco de luz');
+  assert(Math.abs(luz.focos[0].x - palmaLuz.x) < 0.01 && Math.abs(luz.focos[0].y - palmaLuz.y) < 0.01,
+    'el foco está centrado en la palma (RF-21)');
+
+  const radioAbierto = luz.focos[0].radio;
+  assert(Math.abs(radioAbierto - tamanoLuz * CFG_LUZ.lightRadiusFactor) < tamanoLuz * 0.5,
+    'el radio escala con el tamaño de la mano (RF-22): ' + radioAbierto.toFixed(0) + ' px');
+
+  const puntosCerrados = manoFalsa([1, 1, 1, 1, 1]);
+  luz.actualizar([{ handedness: 'Right', puntos: puntosCerrados, curl: Mano.calcularCurl(puntosCerrados) }], 0.016, CFG_LUZ);
+  const radioPuno = luz.focos[0].radio;
+  assert(radioPuno < radioAbierto * 0.8,
+    'con el puño la luz se encoge (RF-22): ' + radioAbierto.toFixed(0) + ' → ' + radioPuno.toFixed(0));
+
+  // RF-23: el parpadeo se mantiene dentro del ±6 % y varía.
+  let parpadeoMin = 2;
+  let parpadeoMax = 0;
+  for (let i = 0; i < 80; i++) {
+    luz.actualizar([manoLuz], 0.016, CFG_LUZ);
+    parpadeoMin = Math.min(parpadeoMin, luz.parpadeo);
+    parpadeoMax = Math.max(parpadeoMax, luz.parpadeo);
+  }
+  assert(parpadeoMin > 1 - CFG_LUZ.lightFlicker * 1.1 && parpadeoMax < 1 + CFG_LUZ.lightFlicker * 1.1,
+    'el parpadeo queda dentro del ±6 % (RF-23): ' + parpadeoMin.toFixed(3) + ' .. ' + parpadeoMax.toFixed(3));
+  assert(parpadeoMax - parpadeoMin > 0.002, 'y la luz parpadea de verdad (RF-23)');
+
+  // RF-23: con una araña lanzada el parpadeo se agranda.
+  const amplitudNormal = Math.abs(luz.parpadeo - 1);
+  luz.impulsar();
+  let amplitudImpulso = 0;
+  for (let i = 0; i < 12; i++) {
+    luz.actualizar([manoLuz], 0.016, CFG_LUZ);
+    amplitudImpulso = Math.max(amplitudImpulso, Math.abs(luz.parpadeo - 1));
+  }
+  assert(amplitudImpulso > CFG_LUZ.lightFlicker,
+    'con una araña lanzada el parpadeo es más fuerte (RF-23): ' + amplitudImpulso.toFixed(3));
+  assert(amplitudImpulso > amplitudNormal || amplitudNormal > 0.005,
+    'el impulso del lanzamiento se suma al parpadeo (RF-23)');
+
+  // RF-27: sin manos la linterna se desvanece a la luz ambiental.
+  const intensidadConMano = luz.intensidad;
+  for (let i = 0; i < 40; i++) luz.actualizar([], 0.016, CFG_LUZ);
+  assert(luz.intensidad < 0.05,
+    'sin manos la linterna se apaga (RF-27): ' + luz.intensidad.toFixed(3));
+  assert(intensidadConMano > 0.3, 'con la mano estaba encendida: ' + intensidadConMano.toFixed(2));
+  for (let i = 0; i < 6; i++) luz.actualizar([manoLuz], 0.1, CFG_LUZ);
+  assert(luz.intensidad > 0.9, 'al volver la mano se vuelve a encender: ' + luz.intensidad.toFixed(2));
+
+  // RF-25: brillo según la distancia a la luz, nunca por debajo del 35 %.
+  const brilloCentro = luz.intensidadEn(palmaLuz.x, palmaLuz.y);
+  const brilloMedio = luz.intensidadEn(palmaLuz.x + radioAbierto * 0.5, palmaLuz.y);
+  const brilloLejos = luz.intensidadEn(palmaLuz.x + 3000, palmaLuz.y + 3000);
+  assert(brilloCentro > 0.85, 'en la palma el brillo está a tope (RF-25): ' + brilloCentro.toFixed(2));
+  assert(brilloMedio < brilloCentro && brilloMedio > 0.35,
+    'a media distancia baja pero sigue por encima del piso: ' + brilloMedio.toFixed(2));
+  assert(brilloLejos >= 0.35 && brilloLejos < brilloMedio,
+    'lejos baja hasta el piso del 35 % (RF-25): ' + brilloLejos.toFixed(2));
+
+  // RF-24: la oscuridad no es negro total, y el agujero usa destination-out.
+  capaUno.registro.length = 0;
+  luz.dibujar(p5Stub);
+  const relleno = capaUno.registro.filter((c) => c.op === 'fill' && c.args[3] > 0)[0];
+  assert(!!relleno, 'la capa pinta la oscuridad (RF-20)');
+  assert(relleno.args[3] > 200 && relleno.args[3] < 255,
+    'la oscuridad deja la luz ambiental mínima (RF-24): alfa ' + relleno.args[3]);
+  assert(p5Stub.registro.some((c) => c.op === 'image'),
+    'la capa de oscuridad se dibuja encima del video (RF-20)');
+  assert(capaUno.registro.some((c) => c.op === 'gco' && c.args[0] === 'destination-out'),
+    'el agujero de luz usa destination-out (RF-21)');
+  assert(capaUno.registro.some((c) => c.op === 'arc'), 'y se dibuja como un círculo (RF-21)');
+  assert(capaUno.drawingContext.globalCompositeOperation === 'source-over',
+    'el modo de composición se restaura al terminar el frame');
+
+  // RF-19: sin `filter` (el stub no lo tiene) se usa el tint como alternativa.
+  p5Stub.tintLlamado = 0;
+  luz.dibujarVideo(p5Stub, { elt: { readyState: 4 } });
+  assert(p5Stub.tintLlamado > 0,
+    'sin soporte de filter el video se tiñe con tint() (RF-19)');
+
+  // RF-26: la viñeta usa un gradiente cacheado.
+  p5Stub.gradientesCreados = 0;
+  luz.dibujarVineta(p5Stub);
+  const creadosPrimera = p5Stub.gradientesCreados;
+  luz.dibujarVineta(p5Stub);
+  assert(creadosPrimera === 1, 'la viñeta crea su gradiente una sola vez (RF-26): ' + creadosPrimera);
+  assert(p5Stub.gradientesCreados === creadosPrimera,
+    'y lo reutiliza en los frames siguientes (RF-26, RNF-07)');
+
+  // --- Fase 2 · Bloque 3: los ojos rojos no se atenúan (RF-25) ---
+  const arañaOjos = new Spider({ tamano: 1, fase: 0, p: p5Stub });
+  assert(arañaOjos.ojos.length === 2, 'la araña tiene dos ojos (RF-25)');
+  const puntosOjos = arañaOjos.ojos.map((o) => o.x + ',' + o.y);
+  arañaOjos.brillo = 0.35;
+  p5Stub.registro.length = 0;
+  arañaOjos.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+  arañaOjos.draw(p5Stub);
+  const llenosRojo = p5Stub.registro.filter(
+    (c) => c.op === 'fill' && c.args[0] > 150 && c.args[1] < 90 && c.args[2] < 110
+  );
+  assert(llenosRojo.length >= 2, 'los ojos se dibujan en rojo (RF-25): ' + llenosRojo.length);
+  assert(llenosRojo.every((c) => c.args[3] > 200),
+    'con el brillo al 35 % los ojos siguen a plena intensidad (RF-25)');
+  assert(puntosOjos.length === 2, 'los ojos tienen posición propia');
+
   // --- T5/T6: una araña por cuerda en el sketch ---
   // (guard: en los escenarios sin cámara o sin modelo no hay detectStart)
   if (global.__ml5.detectStart) {
@@ -619,6 +757,40 @@
   avanzar(40);
   assert(p.colgantes.get('Right-0').araña.estado === Spider.ESTADOS.TREPANDO,
     'al volver a prenderla, el puño vuelve a hacer trepar a la araña');
+
+  // --- Fase 2 · Bloque 3: la linterna en el sketch (tareas 14-16) ---
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(20);
+  assert(!!p.luz && p.luz.focos.length === 1,
+    'el sketch abre un foco de luz en la palma (RF-21)');
+
+  const colganteLuz = p.colgantes.get('Right-0');
+  assert(colganteLuz.araña.brillo >= 0.35 && colganteLuz.araña.brillo <= 1,
+    'la araña tiene el brillo modulado por la luz (RF-25): ' + colganteLuz.araña.brillo.toFixed(2));
+  assert(colganteLuz.cuerda.brillo >= 0.35,
+    'y el hilo también (RF-25): ' + colganteLuz.cuerda.brillo.toFixed(2));
+
+  // RF-27: sin manos la linterna se apaga sola.
+  global.__ml5.detectStart.cb([]);
+  avanzar(40);
+  assert(p.luz.intensidad < 0.1, 'sin manos la linterna se apaga (RF-27): ' + p.luz.intensidad.toFixed(3));
+
+  // RNF-08: la tecla L prende y apaga la linterna.
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(20);
+  p.key = 'l';
+  p.keyPressed();
+  assert(p.luz.activada === false, 'la tecla L apaga la linterna (RNF-08)');
+  p.luz.asegurarCapa(p);
+  p.luz.capa.registro.length = 0;
+  avanzar(2);
+  assert(p.luz.capa.registro.length === 0,
+    'con la linterna apagada no se dibuja la capa de oscuridad (RNF-08)');
+  p.key = 'l';
+  p.keyPressed();
+  avanzar(2);
+  assert(p.luz.activada === true, 'la tecla L la vuelve a prender (RNF-08)');
+  assert(p.luz.capa.registro.length > 0, 'y la oscuridad se vuelve a dibujar');
   }
 
   // --- T9/T10: audio procedural ---

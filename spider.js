@@ -77,6 +77,8 @@ class Spider {
     this.velocidad = 0;           // velocidad de la punta (px/s)
     this.agitacion = 0;           // 0..1.5: cuánto se agita por la velocidad
     this.opacidad = 1;            // para el desvanecimiento de T8
+    // Brillo que le pone la luz de la escena (RF-25). 1 = a plena luz.
+    this.brillo = 1;
 
     // --- Fase 2, Bloque 2: estados del puño ---
     this.estado = ESTADOS_ARAÑA.COLGANDO;
@@ -87,6 +89,13 @@ class Spider {
     this.susto = 0;               // 0..1: patas abiertas al lanzarse (RF-16)
     this.vx = 0;                  // impulso del lanzamiento (RF-15)
     this.vy = 0;
+
+    // Ojos rojos (RF-25): dos puntitos sobre el cefalotórax que brillan siempre,
+    // aunque la luz de la escena esté lejos.
+    this.ojos = [
+      { x: 0, y: 0, radio: 2.6 },
+      { x: 0, y: 0, radio: 2.2 }
+    ];
 
     // Estado de cada pata: coxa, inicio de fémur, rodilla y pie.
     this.patas = [];
@@ -351,11 +360,40 @@ class Spider {
     const escala = this.tamano * this.escala;
     const vuelta = Math.abs(Math.sin(this.vuelco));
     const anchoCuerpo = 0.6 + 0.4 * vuelta;
-    const opacidad = Math.max(0, Math.min(1, this.opacidad));
+    // RF-25: el brillo lo pone la luz de la escena. Los ojos van aparte, con la
+    // opacidad del desvanecimiento pero sin el brillo: brillan siempre.
+    const opacidad = Math.max(0, Math.min(1, this.opacidad * this.brillo));
 
     this.dibujarPatas(p, -1, escala, opacidad);   // lado lejano, detrás del cuerpo
     this.dibujarCuerpo(p, escala, anchoCuerpo, vuelta, opacidad);
     this.dibujarPatas(p, 1, escala, opacidad);    // lado cercano, delante
+    this.dibujarOjos(p, escala, this.opacidad);
+  }
+
+  /**
+   * Ojos rojos del cefalotórax (RF-25). No se atenúan con el brillo de la luz:
+   * sólo con el desvanecimiento de RF-08.
+   */
+  dibujarOjos(p, escala, opacidad) {
+    const a = Math.max(0, Math.min(1, opacidad === undefined ? 1 : opacidad));
+    if (a < 0.02) return;
+
+    const rot = this.rotacion;
+    const cos = Math.cos(rot);
+    const sen = Math.sin(rot);
+
+    p.noStroke();
+    for (let i = 0; i < this.ojos.length; i++) {
+      const ojo = this.ojos[i];
+      const lx = 5 * escala;                                   // hacia la cabeza
+      const ly = (i === 0 ? -3.2 : 3.2) * escala;               // a los costados
+      ojo.radio = (i === 0 ? 2.6 : 2.2) * escala;
+      ojo.x = this.x + lx * cos - ly * sen;
+      ojo.y = this.y + lx * sen + ly * cos;
+
+      p.fill(220, 40, 50, 240 * a);
+      p.circle(ojo.x, ojo.y, ojo.radio * 2);
+    }
   }
 
   /** Dibuja las 4 patas de un lado. */
@@ -408,7 +446,7 @@ class Spider {
     p.pop();
 
     // Brillo especular (S19).
-    this.brillo(p, abdX, abdY, rAbd * 0.62, rot, 0.30 + 0.12 * vuelta, opacidad);
+    this.brilloEspecular(p, abdX, abdY, rAbd * 0.62, rot, 0.30 + 0.12 * vuelta, opacidad);
 
     // --- Marca de reloj de arena roja, sólo visible con el vientre en cámara ---
     if (vuelta > 0.02) {
@@ -424,7 +462,7 @@ class Spider {
     p.ellipse(0, 0, rCef * 2.15, rCef * 1.7 * anchoCuerpo);
     p.pop();
 
-    this.brillo(p, this.x, this.y, rCef * 0.5, rot, 0.22, opacidad);
+    this.brilloEspecular(p, this.x, this.y, rCef * 0.5, rot, 0.22, opacidad);
   }
 
   /**
@@ -464,7 +502,7 @@ class Spider {
   }
 
   /** Brillo especular: degradado radial sobre el cuerpo. */
-  brillo(p, x, y, radio, rot, fuerza, opacidad) {
+  brilloEspecular(p, x, y, radio, rot, fuerza, opacidad) {
     if (!p.drawingContext || !Spider.brilloActivado) return;
     const a = Math.max(0, Math.min(1, opacidad === undefined ? 1 : opacidad));
     if (a < 0.02) return;

@@ -7,6 +7,8 @@ movés la mano rápido y cae con gravedad si dejás de mostrar la mano.
 
 Además reconoce **gestos**: si cerrás el puño, las arañas trepan por su hilo y
 se esconden en la palma; al abrir la mano salen disparadas y vuelven a colgar.
+Y la escena está a oscuras: una **linterna** sigue la palma y solo se ve lo que
+ella ilumina.
 
 Todo es procedural: no hay modelos 3D, ni imágenes, ni archivos de audio. Cero
 build step, cero npm, cero backend.
@@ -44,6 +46,7 @@ Al abrirlo, el navegador pide permiso de cámara: **aceptalo**.
 |---|---|
 | Ver los 21 keypoints y los valores de curl/velocidad | tecla `D` |
 | Prender/apagar la feature del puño | tecla `F` |
+| Prender/apagar la linterna | tecla `L` |
 | Activar el sonido | botón **ACTIVATE SOUND** (arriba a la derecha) |
 | Volumen general, efectos y ambiente | deslizadores del panel de audio |
 | Silenciar todo | casilla *Silenciar* |
@@ -79,7 +82,29 @@ Cada araña pasa por `HANGING → CLIMBING → HIDDEN → LAUNCHING → HANGING`
 Con la tecla `D` se ve, junto a la muñeca, si la mano está en **puño** y la
 **separación** de cada par de dedos (las telarañas de la Fase 2 la van a usar).
 
-## Qué suena
+## Linterna y oscuridad (Fase 2)
+
+La escena se ve a oscuras y **solo la palma ilumina**:
+
+- **Capa de oscuridad** al 90 % sobre el video (`darkness`), así que nunca queda
+  negro total: la luz ambiental (~10 %) siempre deja entrever algo del video.
+- **Un agujero de luz por mano**, centrado en la palma (promedio de la muñeca y
+  los nudillos), dibujado con `destination-out`. El radio escala con el **tamaño
+  de la mano**, **crece al abrirla** y **se encoge con el puño**: si cerrás el
+  puño te quedás casi sin luz.
+- **Parpadeo** con Perlin noise (±6 % de radio e intensidad), más fuerte un
+  instante cuando una araña sale disparada.
+- **El video se desatura y se tiñe en frío** (verdoso/azulado). Usa `filter` del
+  canvas cuando el navegador lo soporta y `tint()` cuando no (Safari viejo).
+- **Arañas e hilos van por encima** de la oscuridad, con el brillo modulado por
+  su distancia a la luz (nunca por debajo del 35 %). Los **ojos rojos de la
+  araña no se atenúan**: brillan siempre.
+- **Viñeta** radial en los bordes, con el gradiente cacheado (no se recalcula
+  por frame).
+- Sin manos, la linterna **se desvanece sola** en ~0.5 s hasta la luz ambiental
+  y vuelve cuando mostrás la mano otra vez.
+
+Con `L` se prende y se apaga toda la feature (útil para depurar).
 
 ## Qué suena
 
@@ -106,11 +131,12 @@ Todo se genera en tiempo real con la Web Audio API de p5.sound.js:
 
 ```
 index.html   CDNs, HUD, panel de audio
-sketch.js    orquestación: cámara, modelo, cuerdas, arañas, puño, audio, render
-hand.js      keypoints, suavizado, curl y velocidad por dedo
+sketch.js    orquestación: cámara, modelo, cuerdas, arañas, puño, luz, audio, render
+hand.js      keypoints, suavizado, curl, velocidad y apertura por mano
 gestures.js  puño (con histéresis) y separación entre dedos
+light.js     oscuridad, linterna que sigue la palma y viñeta
 rope.js      clase Rope: cuerda de seda con Verlet
-spider.js    clase Spider: cuerpo, marca roja, patas con IK y estados del puño
+spider.js    clase Spider: cuerpo, ojos, marca roja, patas con IK y estados del puño
 sound.js     SoundManager: todo el audio procedural
 ```
 
@@ -123,9 +149,11 @@ Los parámetros están en el objeto `CONFIG` al inicio de `sketch.js`: gravedad,
 amortiguación, cantidad de segmentos, largo del hilo, tamaño de la araña,
 suavizado, cuánto se acorta el hilo al doblar un dedo, los umbrales de los
 sonidos, los del reconocedor de gestos (`CONFIG.gestos`: cuándo se considera
-puño, cuánto hay que sostenerlo y cuándo se abre una separación de dedos) y los
+puño, cuánto hay que sostenerlo y cuándo se abre una separación de dedos), los
 del puño (`CONFIG.puno`: velocidad de trepada, cuánto se acorta el hilo al
-llegar arriba, fuerza y escalonado del lanzamiento). El tamaño y los largos de
+llegar arriba, fuerza y escalonado del lanzamiento) y los de la linterna
+(`CONFIG.luz`: `darkness`, `ambientLight`, `lightRadiusFactor`, `lightFlicker`,
+`vignetteStrength` y el piso de brillo de las arañas). El tamaño y los largos de
 las patas están en `spider.js`.
 
 ## Tests

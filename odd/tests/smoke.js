@@ -116,6 +116,40 @@ function contextoFalso() {
 
 global.__audio = contextoFalso();
 
+// ------------------------------------- stub de p5.Graphics (Bloque 3)
+class GraphicsStub {
+  constructor(w, h) {
+    this.width = w;
+    this.height = h;
+    this.registro = [];
+    const grafico = this;
+    this.drawingContext = {
+      fillStyle: '',
+      _gco: 'source-over',
+      get globalCompositeOperation() { return this._gco; },
+      set globalCompositeOperation(v) {
+        this._gco = v;
+        grafico.registro.push({ op: 'gco', args: [v] });
+      },
+      save() {}, restore() {}, beginPath() {}, closePath() {}, fill() {}, fillRect() {},
+      translate(x, y) { grafico.registro.push({ op: 'translate', args: [x, y] }); },
+      scale(x, y) { grafico.registro.push({ op: 'scale', args: [x, y] }); },
+      arc(x, y, r) { grafico.registro.push({ op: 'arc', args: [x, y, r] }); },
+      createRadialGradient() {
+        grafico.registro.push({ op: 'gradiente', args: [] });
+        return { addColorStop() {} };
+      }
+    };
+  }
+  clear() { this.registro.push({ op: 'clear', args: [] }); }
+  noStroke() {}
+  noFill() {}
+  fill(r, g, b, a) { this.registro.push({ op: 'fill', args: [r, g, b, a] }); }
+  rect(x, y, w, h) { this.registro.push({ op: 'rect', args: [x, y, w, h] }); }
+  image() { this.registro.push({ op: 'image', args: [] }); }
+  remove() {}
+}
+
 // ---------------------------------------------------------------- stub p5
 global.__p5 = [];
 class P5Stub {
@@ -124,10 +158,21 @@ class P5Stub {
     this.windowWidth = 800; this.windowHeight = 600;
     this.deltaTime = 16;           // ms por frame (p5 lo calcula real)
     this.draws = 0;
+    this.registro = [];            // llamadas de dibujo (para las pruebas del Bloque 3)
+    this.graphicsCreados = 0;
+    this.tintLlamado = 0;
     this.drawingContext = {
+      // Ojo: sin `filter`, como Safari viejo: el Bloque 3 tiene que caer al tint().
       save() {}, restore() {}, beginPath() {}, ellipse() {}, fill() {}, fillRect() {},
+      arc(x, y, r) { P5Stub.registrar(global.__p5[0], 'arc', [x, y, r]); },
+      translate() {}, scale() {}, closePath() {},
       fillStyle: '',
-      createRadialGradient: () => ({ addColorStop() {} })
+      globalCompositeOperation: 'source-over',
+      createRadialGradient: () => {
+        const p = global.__p5[0];
+        if (p) p.gradientesCreados = (p.gradientesCreados || 0) + 1;
+        return { addColorStop() {} };
+      }
     };
     // p5.sound expone el AudioContext y la salida por acá.
     this.soundOut = { audiocontext: global.__audio, output: nodoFalso(global.__audio, 'out') };
@@ -136,10 +181,22 @@ class P5Stub {
     if (this.preload) this.preload();
     if (this.setup) this.setup();
   }
+  static registrar(p, op, args) {
+    if (p && p.registro) p.registro.push({ op: op, args: args });
+  }
   createCanvas(w, h) { this.width = w; this.height = h; return { parent() {}, style() {} }; }
+  createGraphics(w, h) {
+    this.graphicsCreados = (this.graphicsCreados || 0) + 1;
+    const g = new GraphicsStub(w, h);
+    this.ultimoGraphics = g;
+    return g;
+  }
+  tint() { this.tintLlamado = (this.tintLlamado || 0) + 1; }
+  noTint() { this.noTintLlamado = (this.noTintLlamado || 0) + 1; }
   pixelDensity() {} frameRate() {} background() {} push() {} pop() {}
-  translate() {} scale() {} image() {} rect() {} fill() {} noStroke() {}
+  translate() {} scale() {} image() { P5Stub.registrar(this, 'image', []); } rect() {} noStroke() {}
   stroke() {} strokeWeight() {} circle() {} line() {} noFill() {}
+  fill(r, g, b, a) { P5Stub.registrar(this, 'fill', [r, g, b, a]); this.ultimoFill = [r, g, b, a]; }
   beginShape() { this.beginShapeCalls = (this.beginShapeCalls || 0) + 1; } vertex() {} endShape(modo) {
     // endShape() sin argumento = trazo abierto: sólo lo usan las cuerdas.
     if (modo === undefined) this.hiloCalls = (this.hiloCalls || 0) + 1;
@@ -213,10 +270,11 @@ Object.defineProperty(globalThis, 'navigator', { value: {
 // ------------------------------------------------------------------ código
 const hand = fs.readFileSync(path.join(RAIZ, 'hand.js'), 'utf8');
 const gestures = fs.readFileSync(path.join(RAIZ, 'gestures.js'), 'utf8');
+const light = fs.readFileSync(path.join(RAIZ, 'light.js'), 'utf8');
 const rope = fs.readFileSync(path.join(RAIZ, 'rope.js'), 'utf8');
 const spider = fs.readFileSync(path.join(RAIZ, 'spider.js'), 'utf8');
 const sound = fs.readFileSync(path.join(RAIZ, 'sound.js'), 'utf8');
 const sketch = fs.readFileSync(path.join(RAIZ, 'sketch.js'), 'utf8');
 const pruebas = fs.readFileSync(path.join(__dirname, 'smoke-pruebas.js'), 'utf8');
 
-vm.runInThisContext(hand + '\n' + gestures + '\n' + rope + '\n' + spider + '\n' + sound + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });
+vm.runInThisContext(hand + '\n' + gestures + '\n' + light + '\n' + rope + '\n' + spider + '\n' + sound + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });

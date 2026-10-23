@@ -165,6 +165,33 @@ const Mano = (() => {
   }
 
   /**
+   * Qué tan abiertos están los dedos: 0 = puño, 1 = mano abierta.
+   * Se mide la distancia media entre puntas vecinas y se normaliza con el largo
+   * de la mano (muñeca → nudillo del medio), así no depende de la escala.
+   *
+   * DECISIÓN: vivía en `sketch.js` y se mudó acá en la Fase 2 (Bloque 3) porque
+   * ahora la necesitan la linterna (RF-22) y el audio: una sola definición.
+   */
+  function calcularApertura(puntos) {
+    if (!puntos || puntos.length < 21) return 0;
+    const muneca = puntos[0];
+    const nudillo = puntos[9];
+    if (!muneca || !nudillo) return 0;
+
+    const referencia = Math.hypot(nudillo.x - muneca.x, nudillo.y - muneca.y) || 1;
+    let suma = 0;
+    for (let i = 1; i < PUNTAS.length; i++) {
+      const a = puntos[PUNTAS[i]];
+      const b = puntos[PUNTAS[i - 1]];
+      suma += Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    const medio = suma / (PUNTAS.length - 1) / referencia;
+    // Empírico: ~0.3 con el puño cerrado y ~0.8 con la mano abierta.
+    return Math.max(0, Math.min(1, (medio - 0.4) / 0.45));
+  }
+
+  /**
    * Seguimiento de las manos: suaviza los keypoints y calcula curl y velocidad.
    * Una instancia por sketch; adentro guarda el estado de cada mano detectada.
    */
@@ -289,6 +316,7 @@ const Mano = (() => {
     extraer,
     crearMapa,
     calcularCurl,
+    calcularApertura,
     Seguimiento
   };
 })();
