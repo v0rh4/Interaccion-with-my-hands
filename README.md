@@ -5,8 +5,8 @@ de cada dedo cuelga una **araña viuda negra** en un hilo de seda, como títeres
 La araña se balancea con inercia, sube cuando dobrás un dedo, se agita cuando
 movés la mano rápido y cae con gravedad si dejás de mostrar la mano.
 
-Además reconoce **gestos** (puño, mano abierta, pellizco, índice y paz): el
-nombre del gesto aparece en el HUD y cada gesto tiene su propio sonido.
+Además reconoce **gestos**: si cerrás el puño, las arañas trepan por su hilo y
+se esconden en la palma; al abrir la mano salen disparadas y vuelven a colgar.
 
 Todo es procedural: no hay modelos 3D, ni imágenes, ni archivos de audio. Cero
 build step, cero npm, cero backend.
@@ -43,6 +43,7 @@ Al abrirlo, el navegador pide permiso de cámara: **aceptalo**.
 | Acción | Control |
 |---|---|
 | Ver los 21 keypoints y los valores de curl/velocidad | tecla `D` |
+| Prender/apagar la feature del puño | tecla `F` |
 | Activar el sonido | botón **ACTIVATE SOUND** (arriba a la derecha) |
 | Volumen general, efectos y ambiente | deslizadores del panel de audio |
 | Silenciar todo | casilla *Silenciar* |
@@ -50,34 +51,35 @@ Al abrirlo, el navegador pide permiso de cámara: **aceptalo**.
 El sonido **no arranca solo**: el navegador exige un gesto del usuario antes de
 dejar sonar nada. El botón lo activa una sola vez y después alcanza.
 
-## Gestos y el puño
+## Gestos y el puño (Fase 2)
 
-El reconocedor mira el **curl** de cada dedo (ya se calculaba para el largo del
-hilo) y la distancia entre las puntas del pulgar y del índice, normalizada por
-el tamaño de la mano. No depende de la escala de la imagen ni de cómo gires la
-mano.
+El reconocedor vive en `gestures.js` y mide dos cosas: el **curl de los cuatro
+dedos** (índice, medio, anular y meñique; el pulgar se ignora) y la **separación
+entre las puntas**, normalizada por el tamaño de la mano (muñeca → nudillo del
+medio, así no depende de la escala ni de cómo gires la mano).
 
-| Gesto | Cómo se reconoce | Qué pasa |
-|---|---|---|
-| Mano abierta | los cuatro dedos largos estirados | las arañas cuelgan largo |
-| Puño | los cuatro dedos largos doblados | las arañas se repliegan y suben por el hilo |
-| Pellizco | las puntas del pulgar y del índice se tocan, con el índice apenas doblado | la seda se tensa y cruje |
-| Índice | sólo el índice queda estirado | pataleo |
-| Paz | índice y medio estirados | pataleo |
+### Puño → trepar y esconderse
 
-Un gesto se confirma recién después de **2 frames seguidos**, así el HUD no
-parpadea entre dos gestos mientras te movés. El nombre del gesto se ve en el
-HUD (arriba a la izquierda) y, con la tecla `D`, junto a la muñeca.
+- **Cerrar el puño**: los cuatro dedos por encima de **0.75** sostenidos
+  **150 ms**. La histéresis evita el parpadeo: con el puño ya cerrado se
+  mantiene hasta bajar de **0.5**.
+- Al cerrarlo, las arañas de esa mano **trepan** por su hilo (patas alternadas,
+  cada una a su ritmo ±20 %), se achican hasta el **60 %** y al llegar a la
+  palma **se esconden**: no se dibuja ni la araña ni su hilo.
+- **Abrir la mano**: cada araña escondida **sale disparada** desde la palma con
+  un impulso radial aleatorio, escalonadas hasta **250 ms** entre una y otra, y
+  con las patas abiertas en "susto" (se recuperan en ~0.5 s). El hilo se estira
+  detrás y las trae de vuelta: vuelven a colgar.
+- Si abrís la mano antes de que terminen de trepar, vuelven a colgar sin más.
+- Si la mano desaparece con arañas escondidas, se aplica el comportamiento de
+  siempre: caen con gravedad y se desvanecen en ~1 s.
 
-### Qué hace el puño
+Cada araña pasa por `HANGING → CLIMBING → HIDDEN → LAUNCHING → HANGING`.
 
-Al cerrar el puño, las arañas de esa mano **se repliegan**: el hilo se acorta
-(la araña sube casi hasta la punta del dedo) y las patas se recogen contra el
-cuerpo, con el pataleo calmado. Al abrir la mano, la defensa se deshace: el
-hilo se alarga y las arañas vuelven a bajar y a balancearse.
+Con la tecla `D` se ve, junto a la muñeca, si la mano está en **puño** y la
+**separación** de cada par de dedos (las telarañas de la Fase 2 la van a usar).
 
-El repliegue es gradual (no hay teletransporte) y el hilo sigue siendo física
-Verlet, así que las arañas viajan por el hilo y siguen oscilando.
+## Qué suena
 
 ## Qué suena
 
@@ -94,9 +96,9 @@ Todo se genera en tiempo real con la Web Audio API de p5.sound.js:
 - **Balanceo**: whoosh grave cuando la araña se sacude.
 - **Puño cerrado**: acento defensivo corto (no se repite mientras siga cerrado).
 - **Movimiento brusco**: sting disonante muy breve.
-- **Gestos**: el puño dispara el acento defensivo; abrir la mano, un whoosh
-  (las arañas bajan); el pellizco, un crujido de seda; la paz y el índice, un
-  pataleo. Cada gesto suena sólo al cambiar, no en cada frame.
+- **Puño**: acento defensivo corto cuando el puño se cierra (lo confirma
+  `gestures.js`, una vez por flanco y por mano).
+- **Lanzamiento**: whoosh grave cuando las arañas salen disparadas al abrir la mano.
 - **Ambiente**: drone evolutivo con ruido filtrado y LFO lento, que entra y sale
   con fundidos cuando aparecen y desaparecen las arañas.
 
@@ -104,10 +106,11 @@ Todo se genera en tiempo real con la Web Audio API de p5.sound.js:
 
 ```
 index.html   CDNs, HUD, panel de audio
-sketch.js    orquestación: cámara, modelo, cuerdas, arañas, audio, render
-hand.js      keypoints, suavizado, curl y velocidad por dedo, y gestos
+sketch.js    orquestación: cámara, modelo, cuerdas, arañas, puño, audio, render
+hand.js      keypoints, suavizado, curl y velocidad por dedo
+gestures.js  puño (con histéresis) y separación entre dedos
 rope.js      clase Rope: cuerda de seda con Verlet
-spider.js    clase Spider: cuerpo, marca roja y 8 patas con IK
+spider.js    clase Spider: cuerpo, marca roja, patas con IK y estados del puño
 sound.js     SoundManager: todo el audio procedural
 ```
 
@@ -119,10 +122,11 @@ está en `odd/tasks/black-widow-spiders.md`.
 Los parámetros están en el objeto `CONFIG` al inicio de `sketch.js`: gravedad,
 amortiguación, cantidad de segmentos, largo del hilo, tamaño de la araña,
 suavizado, cuánto se acorta el hilo al doblar un dedo, los umbrales de los
-sonidos y los del reconocedor de gestos (`CONFIG.gestos`: qué curl cuenta como
-dedo estirado, cuándo es un pellizco, cuántos frames tarda en confirmar un
-gesto, cuánto se repliega el hilo con el puño y con qué rapidez). El tamaño y
-los largos de las patas están en `spider.js`.
+sonidos, los del reconocedor de gestos (`CONFIG.gestos`: cuándo se considera
+puño, cuánto hay que sostenerlo y cuándo se abre una separación de dedos) y los
+del puño (`CONFIG.puno`: velocidad de trepada, cuánto se acorta el hilo al
+llegar arriba, fuerza y escalonado del lanzamiento). El tamaño y los largos de
+las patas están en `spider.js`.
 
 ## Tests
 

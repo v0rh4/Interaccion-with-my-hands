@@ -212,10 +212,11 @@ Object.defineProperty(globalThis, 'navigator', { value: {
 
 // ------------------------------------------------------------------ código
 const hand = fs.readFileSync(path.join(RAIZ, 'hand.js'), 'utf8');
+const gestures = fs.readFileSync(path.join(RAIZ, 'gestures.js'), 'utf8');
 const rope = fs.readFileSync(path.join(RAIZ, 'rope.js'), 'utf8');
 const spider = fs.readFileSync(path.join(RAIZ, 'spider.js'), 'utf8');
 const sound = fs.readFileSync(path.join(RAIZ, 'sound.js'), 'utf8');
 const sketch = fs.readFileSync(path.join(RAIZ, 'sketch.js'), 'utf8');
 const pruebas = fs.readFileSync(path.join(__dirname, 'smoke-pruebas.js'), 'utf8');
 
-vm.runInThisContext(hand + '\n' + rope + '\n' + spider + '\n' + sound + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });
+vm.runInThisContext(hand + '\n' + gestures + '\n' + rope + '\n' + spider + '\n' + sound + '\n' + sketch + '\n' + pruebas, { filename: 'bundle.js' });

@@ -45,21 +45,28 @@ const CONFIG = {
     ventana: 90          // frames para medir el promedio
   },
   gestos: {
-    // Fase 2 · Bloque 1: reconocimiento de gestos.
-    umbralExtendido: 0.42,   // curl por debajo de esto = dedo estirado
-    umbralDoblado: 0.58,     // curl por encima de esto = dedo doblado
-    umbralPellizco: 0.42,    // distancia pulgar-índice / tamaño de la mano
-    framesEstables: 2,       // frames para confirmar un gesto (evita parpadeo)
+    // Fase 2 · Bloque 1: umbrales de gestures.js.
+    fistCloseThreshold: 0.75,  // curl de los 4 dedos para entrar en puño (RF-11)
+    fistOpenThreshold: 0.5,    // por debajo de esto el puño se suelta (RF-12)
+    fistHoldMs: 150,           // cuánto hay que sostenerlo para confirmarlo (RF-12)
+    spreadOn: 0.35,            // separación que activa la telaraña (RF-28)
+    spreadOff: 0.25            // y por debajo de esto se suelta (RF-28)
+  },
+  puno: {
     // Fase 2 · Bloque 2: qué pasa cuando la mano hace puño.
-    factorPuno: 0.75,        // cuánto se repliega el hilo con el puño
-    velocidadPuno: 6         // velocidad de la transición de la defensa (1/s)
+    climbSpeed: 1.15,          // progreso de trepada por segundo (RF-13)
+    hiloTrepada: 0.85,         // cuánto se acorta el hilo al llegar a la palma (RF-14)
+    launchForce: 7,            // impulso del lanzamiento, px por frame (RF-15)
+    launchDelayMs: 250,        // retraso escalonado máximo por araña (RF-15)
+    launchGravedad: 0.35,      // gravedad durante el vuelo (RF-15)
+    launchAmortiguacion: 0.985, // retención de velocidad durante el vuelo (RF-15)
+    launchDuracion: 1.4        // tope de seguridad del vuelo, en segundos
   },
   audio: {
     umbralCreak: 200,    // px/s para que un dedo enseñe la seda
     umbralSkitter: 900,  // px/s para el pataleo rápido
     umbralSting: 1500,   // px/s para el movimiento brusco
     umbralBalanceo: 130, // px/s del balanceo para el whoosh
-    umbralPuño: 0.62,    // curl medio para considerar un puño
     duracionPista: 9000  // ms que dura la pista inicial
   },
   debug: {
@@ -86,9 +93,9 @@ const esquema = (p) => {
   let vineta = null;
 
   const seguimiento = new Mano.Seguimiento();  // suavizado, curl y velocidad
-  const reconocedor = new Mano.Gestos();       // gestos por mano (Fase 2)
+  const gestos = Gestos.crear();                // puño y separación (Fase 2)
   const colgantes = new Map();                  // clave: 'handedness-indiceDedo' → {cuerda, araña}
-  const defensaManos = new Map();               // 'handedness' → 0..1 (postura defensiva)
+  let featurePuno = true;                       // tecla F: prende/apaga el puño (RNF-08)
   const variacionHilo = [1, 1, 1, 1, 1];       // ±15 % por dedo (RF-10)
   const variacionAraña = [1, 1, 1, 1, 1];      // ±15 % por dedo (RF-10)
   const faseAraña = [0, 0, 0, 0, 0];           // fase de animación propia por dedo (RF-10)
@@ -158,23 +165,30 @@ const esquema = (p) => {
       saltoMaximo: CONFIG.saltoMaximo
     });
 
-    // Fase 2: gesto de cada mano y postura defensiva (puño).
-    const gestos = detectarGestos(manos);
-    actualizarDefensa(gestos, dt);
+    // Fase 2: gestos de cada mano (puño con histéresis y separación de dedos).
+    const gestosManos = gestos.actualizar(manos, dt, {
+      fistCloseThreshold: CONFIG.gestos.fistCloseThreshold,
+      fistOpenThreshold: CONFIG.gestos.fistOpenThreshold,
+      fistHoldMs: CONFIG.gestos.fistHoldMs,
+      spreadOn: CONFIG.gestos.spreadOn,
+      spreadOff: CONFIG.gestos.spreadOff
+    });
 
     actualizarColgantes(manos, dt);
-    actualizarSonido(manos, gestos);
+    actualizarSonido(manos, gestosManos);
 
     dibujarFondo(p);
     dibujarVineta(p);
     dibujarColgantes(p);
-    if (mostrarDebug) dibujarDebug(p, manos, gestos);
-    actualizarInfo(p, manos, gestos);
+    if (mostrarDebug) dibujarDebug(p, manos);
+    actualizarInfo(p, manos);
     medirRendimiento(p);
   };
 
   p.keyPressed = () => {
     if (p.key === 'd' || p.key === 'D') mostrarDebug = !mostrarDebug;
+    // F prende y apaga la feature del puño (RNF-08).
+    if (p.key === 'f' || p.key === 'F') featurePuno = !featurePuno;
   };
 
   p.windowResized = () => {
@@ -260,43 +274,16 @@ const esquema = (p) => {
 
   // --------------------------------------------------------------- gestos ---
 
-  /**
-   * Gesto de cada mano (Fase 2, Bloque 1).
-   *
-   * El umbral del puño es el mismo que ya usaba el audio
-   * (CONFIG.audio.umbralPuño), así el gesto y el sonido no se contradicen.
-   */
-  function detectarGestos(manos) {
-    return reconocedor.actualizar(manos, {
-      umbralExtendido: CONFIG.gestos.umbralExtendido,
-      umbralDoblado: CONFIG.gestos.umbralDoblado,
-      umbralPellizco: CONFIG.gestos.umbralPellizco,
-      umbralPuno: CONFIG.audio.umbralPuño,
-      framesEstables: CONFIG.gestos.framesEstables
-    });
-  }
-
-  /**
-   * Postura defensiva por mano: 0 = cuelga normal, 1 = repliegue total.
-   *
-   * La transición es exponencial e independiente de la tasa de frames, así la
-   * araña sube y baja por el hilo sin teletransportarse (Fase 2, Bloque 2).
-   */
-  function actualizarDefensa(gestos, dt) {
-    const vistos = new Set();
-    const factor = 1 - Math.exp(-CONFIG.gestos.velocidadPuno * dt);
-
-    for (const g of gestos) {
-      vistos.add(g.id);
-      const objetivo = g.gesto.id === 'puño' ? 1 : 0;
-      const actual = defensaManos.get(g.id) || 0;
-      defensaManos.set(g.id, actual + (objetivo - actual) * factor);
+  /** Centro de la palma: promedio de muñeca y nudillos (0, 5, 9 y 17). */
+  function centroDePalma(mano) {
+    const indices = [0, 5, 9, 17];
+    let x = 0;
+    let y = 0;
+    for (const i of indices) {
+      x += mano.puntos[i].x;
+      y += mano.puntos[i].y;
     }
-
-    // La mano que desaparece pierde la defensa: si vuelve, cuelga normal.
-    for (const id of Array.from(defensaManos.keys())) {
-      if (!vistos.has(id)) defensaManos.delete(id);
-    }
+    return { x: x / indices.length, y: y / indices.length };
   }
 
   // --------------------------------------------------------------- cuerdas ---
@@ -311,17 +298,22 @@ const esquema = (p) => {
   /**
    * Ancla una cuerda por punta de dedo, crea la araña que cuelga de ella y
    * actualiza ambas. Clave: 'handedness-indiceDedo' (spec.md §8).
+   *
+   * Fase 2, Bloque 2: acá también vive la máquina de estados de cada araña
+   * (HANGING → CLIMBING → HIDDEN → LAUNCHING → HANGING) que dispara el puño.
    */
   function actualizarColgantes(manos, dt) {
     const activas = new Set();
 
     for (const mano of manos) {
-      // Postura defensiva de esta mano (Fase 2, Bloque 2): 1 = puño cerrado.
-      const defensa = defensaManos.get(mano.handedness) || 0;
+      const enPuño = featurePuno && gestos.isFist(mano);
+      const palma = centroDePalma(mano);
 
       for (const punta of mano.puntas) {
         const clave = mano.handedness + '-' + punta.indice;
         activas.add(clave);
+
+        const base = CONFIG.longitudHilo * variacionHilo[punta.indice];
 
         let colgante = colgantes.get(clave);
         if (!colgante) {
@@ -330,23 +322,63 @@ const esquema = (p) => {
         } else if (colgante.soltada) {
           // La mano volvió: la araña se vuelve a enganchar (RF-08).
           // Se le cambia el hilo por uno nuevo para que no dé un tirón.
-          colgante.cuerda = new Rope(
-            punta.x,
-            punta.y,
-            CONFIG.longitudHilo * variacionHilo[punta.indice],
-            CONFIG.segmentos
-          );
+          colgante.cuerda = new Rope(punta.x, punta.y, base, CONFIG.segmentos);
           colgante.soltada = false;
           colgante.opacidad = 1;
           colgante.araña.opacidad = 1;
+          colgante.araña.colgar();
         }
 
-        // T7: el curl acorta el hilo y la araña sube; al extender, baja (RF-06).
-        // Fase 2: con el puño el hilo se repliega todavía más y la araña se
-        // acurruca contra la punta del dedo.
-        const largo = CONFIG.longitudHilo * variacionHilo[punta.indice]
-          * (1 - CONFIG.factorCurl * punta.curl)
-          * (1 - CONFIG.gestos.factorPuno * defensa);
+        const araña = colgante.araña;
+
+        // --- Fase 2, Bloque 2: transiciones del puño ---
+        if (!featurePuno && araña.estado !== Spider.ESTADOS.COLGANDO) {
+          // Con la feature apagada (tecla F) la araña vuelve a colgar.
+          araña.colgar();
+        } else if (araña.estado === Spider.ESTADOS.COLGANDO) {
+          if (enPuño) araña.trepar(0, 0);        // entra en CLIMBING
+        } else if (araña.estado === Spider.ESTADOS.TREPANDO) {
+          if (!enPuño) {
+            araña.colgar();                      // se abrió la mano antes de llegar
+          } else {
+            araña.trepar(dt, CONFIG.puno.climbSpeed);
+            if (araña.progreso >= 1) araña.ocultar();
+          }
+        } else if (araña.estado === Spider.ESTADOS.OCULTA) {
+          if (!enPuño) {
+            // Se abrió la mano: sale disparada, cada araña con su retraso (RF-15).
+            if (colgante.espera === undefined) {
+              colgante.espera = Math.random() * CONFIG.puno.launchDelayMs / 1000;
+            }
+            colgante.espera -= dt;
+            if (colgante.espera <= 0) {
+              // Impulso radial desde la palma, con un desvío aleatorio.
+              const ang = Math.atan2(punta.y - palma.y, punta.x - palma.x)
+                + (Math.random() - 0.5) * 0.9;
+              const fuerza = CONFIG.puno.launchForce * (0.7 + Math.random() * 0.6);
+              araña.lanzar(Math.cos(ang) * fuerza, Math.sin(ang) * fuerza);
+              // El hilo se estira: se rearma a su largo completo.
+              colgante.cuerda = new Rope(punta.x, punta.y, base, CONFIG.segmentos);
+              colgante.espera = undefined;
+              colgante.tiempoLanzamiento = 0;
+              colgante.sonarLanzamiento = true;
+            }
+          }
+        } else if (araña.estado === Spider.ESTADOS.LANZANDO) {
+          colgante.tiempoLanzamiento = (colgante.tiempoLanzamiento || 0) + dt;
+        }
+
+        // --- Largo del hilo (RF-06 y RF-17) ---
+        let largo;
+        if (araña.estado === Spider.ESTADOS.TREPANDO || araña.estado === Spider.ESTADOS.OCULTA) {
+          // RF-17: con el puño manda el estado, no el curl de cada dedo.
+          largo = base * (1 - CONFIG.puno.hiloTrepada * araña.progreso);
+        } else if (araña.estado === Spider.ESTADOS.LANZANDO) {
+          largo = base;   // el hilo ya está estirado detrás de la araña
+        } else {
+          // T7: el curl acorta el hilo y la araña sube; al extender, baja (RF-06).
+          largo = base * (1 - CONFIG.factorCurl * punta.curl);
+        }
         colgante.cuerda.setLength(largo);
 
         // T7: al mover rápido la araña oscila más (menos amortiguación) y se agita.
@@ -367,8 +399,26 @@ const esquema = (p) => {
         colgante.finX = fin.x;
         colgante.finY = fin.y;
 
-        // La araña cuelga del extremo libre y gira con el último segmento (S20).
-        colgante.araña.update(fin, colgante.cuerda.endAngle(), punta.velocidad, defensa);
+        if (araña.estado === Spider.ESTADOS.LANZANDO) {
+          // Vuelo libre con el hilo estirándose detrás (rebote elástico, RF-15).
+          araña.actualizarLanzamiento(
+            dt,
+            CONFIG.puno.launchGravedad,
+            CONFIG.puno.launchAmortiguacion,
+            fin
+          );
+          colgante.cuerda.tirarDe(araña.x, araña.y, 0.2);
+
+          const finAhora = colgante.cuerda.endPoint();
+          const cerca = Math.hypot(araña.x - finAhora.x, araña.y - finAhora.y) < 14;
+          if (cerca || colgante.tiempoLanzamiento > CONFIG.puno.launchDuracion) {
+            araña.colgar();
+          }
+        } else {
+          // Colgando o trepando la araña va en el extremo libre del hilo: como el
+          // hilo se acorta mientras trepa, sube por él.
+          araña.update(fin, colgante.cuerda.endAngle(), punta.velocidad);
+        }
       }
     }
 
@@ -382,6 +432,9 @@ const esquema = (p) => {
 
       if (!colgante.soltada) {
         colgante.soltada = true;
+        // RF-18: si estaba escondida en la palma, vuelve a colgar para poder
+        // caer y desvanecerse como cualquier otra (RF-08).
+        colgante.araña.colgar();
         colgante.cuerda.soltar();
         colgante.caida = 0;
       }
@@ -476,7 +529,7 @@ const esquema = (p) => {
   /**
    * Traduce el estado de las manos en eventos de sonido (spec §15.3).
    */
-  function actualizarSonido(manos, gestos) {
+  function actualizarSonido(manos, gestosManos) {
     if (!sonido.activo) return;
 
     // Aparición y desaparición (spec §15.2): una sola vez por evento.
@@ -504,22 +557,21 @@ const esquema = (p) => {
       }
     }
 
-    // Gesto nuevo (Fase 2, Bloque 1): un sonido por gesto, y sólo al cambiar.
+    // Fase 2, Bloque 1: el acento del puño, por flanco y por mano.
     //
-    // DECISIÓN: el sonido del puño pasa a dispararse desde el reconocedor de
-    // gestos y no desde el curl medio. El detector exige que los cuatro dedos
-    // largos estén doblados, así que el umbral queda más estricto que antes,
-    // y el disparo es por mano (antes era global: con dos manos sólo sonaba
-    // una vez).
-    for (const g of gestos) {
-      if (!g.cambio) continue;
-      switch (g.gesto.id) {
-        case 'puño': sonido.puño(); break;
-        case 'abierta': sonido.whoosh(0.55); break;
-        case 'pellizco': sonido.creak(0.5); break;
-        case 'paz': sonido.skitter(0.45); break;
-        case 'indice': sonido.skitter(0.3); break;
-        default: break;
+    // DECISIÓN: el puño lo confirma gestures.js (4 dedos por encima de 0.75
+    // sostenidos 150 ms), así que el sonido sale del mismo detector que mueve a
+    // las arañas y no de un umbral aparte. Antes el flag era global: con dos
+    // manos sólo sonaba una vez.
+    for (const g of gestosManos) {
+      if (g.cambio && g.enPuño) sonido.puño();
+    }
+
+    // Fase 2, Bloque 2: whoosh cuando una araña sale disparada (RF-15).
+    for (const colgante of colgantes.values()) {
+      if (colgante.sonarLanzamiento) {
+        colgante.sonarLanzamiento = false;
+        sonido.whoosh(0.6);
       }
     }
 
@@ -602,8 +654,10 @@ const esquema = (p) => {
   function dibujarColgantes(p2) {
     p2.push();
     // Primero los hilos y después las arañas, para que la araña quede encima
-    // del hilo que la sostiene.
+    // del hilo que la sostiene. El hilo de una araña escondida no se dibuja
+    // (RF-14).
     for (const colgante of colgantes.values()) {
+      if (colgante.araña.estado === Spider.ESTADOS.OCULTA) continue;
       colgante.cuerda.dibujar(p2, null, colgante.opacidad, CONFIG.calidad.halo);
     }
     for (const colgante of colgantes.values()) {
@@ -612,7 +666,7 @@ const esquema = (p) => {
     p2.pop();
   }
 
-  function dibujarDebug(p2, manos, gestos) {
+  function dibujarDebug(p2, manos) {
     p2.push();
     for (const mano of manos) {
       const puntos = mano.puntos;
@@ -657,38 +711,32 @@ const esquema = (p) => {
         );
       }
 
-      // Gesto de la mano (Fase 2, Bloque 1), junto a la muñeca.
-      const gesto = gestos ? gestos.find((g) => g.id === mano.handedness) : null;
-      if (gesto && puntos[0]) {
+      // Fase 2, Bloque 1: puño y separación de los pares de dedos (tarea 10),
+      // junto a la muñeca.
+      if (puntos[0]) {
+        const pares = Gestos.PARES_ADYACENTES.map(
+          (par) => Gestos.spreadValue(mano, par[0], par[1]).toFixed(2)
+        ).join(' ');
+
         p2.textSize(13);
         p2.textAlign(p2.LEFT, p2.TOP);
-        p2.fill(226, 176, 84, 230);
-        p2.text(gesto.gesto.nombre, puntos[0].x + 12, puntos[0].y + 8);
+        p2.fill(gestos.isFist(mano) ? p2.color(228, 70, 92) : p2.color(226, 176, 84));
+        p2.text(
+          'puño: ' + (gestos.isFist(mano) ? 'sí' : 'no') + '  sep: ' + pares,
+          puntos[0].x + 12,
+          puntos[0].y + 8
+        );
       }
     }
     p2.pop();
   }
 
-  function actualizarInfo(p2, manos, gestos) {
+  function actualizarInfo(p2, manos) {
     if (p2.frameCount - ultimoUpdateInfo < 10) return;
     ultimoUpdateInfo = p2.frameCount;
     document.getElementById('info-manos').textContent = String(manos.length);
     document.getElementById('info-fps').textContent = String(Math.round(p2.frameRate()));
     document.getElementById('info-estado').textContent = estadoTexto(manos.length);
-    document.getElementById('info-gesto').textContent = textoGesto(gestos);
-  }
-
-  /**
-   * Nombre del gesto de la(s) mano(s) para el HUD (Fase 2, Bloque 1).
-   * Con dos manos se listan los gestos distintos, separados por " / ".
-   */
-  function textoGesto(gestos) {
-    if (!gestos || gestos.length === 0) return '—';
-    const nombres = [];
-    for (const g of gestos) {
-      if (nombres.indexOf(g.gesto.nombre) === -1) nombres.push(g.gesto.nombre);
-    }
-    return nombres.join(' / ');
   }
 
   function estadoTexto(cantidad) {

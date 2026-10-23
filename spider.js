@@ -29,9 +29,23 @@ const ANCLAJE_PATAS = [
 /** Velocidad (px/s) a partir de la cual la araña se agita al máximo. */
 const VELOCIDAD_AGITACION = 900;
 
+/**
+ * Estados de la araña (Fase 2 §14):
+ *   HANGING → CLIMBING → HIDDEN → LAUNCHING → HANGING
+ */
+const ESTADOS_ARAÑA = {
+  COLGANDO: 'HANGING',
+  TREPANDO: 'CLIMBING',
+  OCULTA: 'HIDDEN',
+  LANZANDO: 'LAUNCHING'
+};
+
 class Spider {
   /** Brillo especular: se puede apagar si el rendimiento no alcanza (T9). */
   static brilloActivado = true;
+
+  /** Estados, expuestos para el sketch y los tests. */
+  static ESTADOS = ESTADOS_ARAÑA;
 
   /**
    * @param {object} opciones { tamano, fase, p } — tamaño y fase propios por
@@ -63,6 +77,16 @@ class Spider {
     this.velocidad = 0;           // velocidad de la punta (px/s)
     this.agitacion = 0;           // 0..1.5: cuánto se agita por la velocidad
     this.opacidad = 1;            // para el desvanecimiento de T8
+
+    // --- Fase 2, Bloque 2: estados del puño ---
+    this.estado = ESTADOS_ARAÑA.COLGANDO;
+    this.progreso = 0;            // 0 = extremo del hilo, 1 = la palma
+    // Cada araña trepa a su ritmo, ±20 % (RF-13).
+    this.velocidadTrepada = 1 + (Math.random() * 0.4 - 0.2);
+    this.escala = 1;              // baja hasta 0.6 mientras trepa (RF-14)
+    this.susto = 0;               // 0..1: patas abiertas al lanzarse (RF-16)
+    this.vx = 0;                  // impulso del lanzamiento (RF-15)
+    this.vy = 0;
     this.defensa = 0;             // 0..1: postura defensiva (Fase 2, Bloque 2)
 
     // Estado de cada pata: coxa, inicio de fémur, rodilla y pie.
@@ -117,6 +141,88 @@ class Spider {
     this.calcularPatas();
   }
 
+  // ------------------------------------------------ estados del puño (F2) ---
+
+  /**
+   * Trepa por el hilo hacia la palma (RF-13, RF-14). El avance del progreso es
+   * lo que acorta el hilo en el sketch, así que la araña sube por él.
+   *
+   * @param {number} dt         segundos
+   * @param {number} velocidad  progreso por segundo (CONFIG.puno.climbSpeed)
+   * @returns {number} progreso 0..1
+   */
+  trepar(dt, velocidad) {
+    this.estado = ESTADOS_ARAÑA.TREPANDO;
+    const v = (velocidad === undefined ? 1 : velocidad) * this.velocidadTrepada;
+    this.progreso = Math.min(1, this.progreso + v * Math.max(0, dt || 0));
+    this.escala = 1 - 0.4 * this.progreso;   // hasta el 60 % (RF-14)
+    return this.progreso;
+  }
+
+  /** Se esconde en la palma: no se dibuja y su hilo se oculta (RF-14). */
+  ocultar() {
+    this.estado = ESTADOS_ARAÑA.OCULTA;
+    this.progreso = 1;
+    this.escala = 0.6;
+  }
+
+  /**
+   * Sale disparada desde la palma (RF-15).
+   *
+   * @param {number} vx impulso horizontal, en px por frame
+   * @param {number} vy impulso vertical, en px por frame
+   */
+  lanzar(vx, vy) {
+    this.estado = ESTADOS_ARAÑA.LANZANDO;
+    this.vx = vx;
+    this.vy = vy;
+    this.susto = 1;      // las patas se abren de golpe (RF-16)
+    this.progreso = 0;
+    this.escala = 1;
+  }
+
+  /** Vuelve a colgar del extremo del hilo. */
+  colgar() {
+    this.estado = ESTADOS_ARAÑA.COLGANDO;
+    this.progreso = 0;
+    this.escala = 1;
+  }
+
+  /**
+   * Integra un frame de lanzamiento: vuelo libre con gravedad y amortiguación,
+   * más un resorte hacia el extremo del hilo (el rebote elástico de RF-15).
+   *
+   * @param {number} dt            segundos
+   * @param {number} gravedad      px por frame² (a 60 FPS)
+   * @param {number} amortiguacion retención de la velocidad
+   * @param {{x:number,y:number}} objetivo extremo del hilo (tira de la araña)
+   */
+  actualizarLanzamiento(dt, gravedad, amortiguacion, objetivo) {
+    // El vuelo se integra en "frames de 60 FPS" para no depender de la tasa.
+    const paso = Math.max(0.001, Math.min(dt || 0.016, 0.1)) * 60;
+
+    this.vy += (gravedad === undefined ? 0.35 : gravedad) * paso;
+    this.vx *= amortiguacion === undefined ? 0.985 : amortiguacion;
+    this.vy *= amortiguacion === undefined ? 0.985 : amortiguacion;
+
+    if (objetivo) {
+      // El hilo estirado tira de la araña de vuelta.
+      this.vx += (objetivo.x - this.x) * 0.02 * paso;
+      this.vy += (objetivo.y - this.y) * 0.02 * paso;
+    }
+
+    this.x += this.vx * paso;
+    this.y += this.vy * paso;
+
+    // El susto se recupera en ~0.5 s (RF-16).
+    this.susto = Math.max(0, this.susto - (dt || 0.016) / 0.5);
+
+    this.tiempo += 1 / 60;
+    this.velocidad = Math.hypot(this.vx, this.vy) * 60;
+    this.agitacion = Math.min(1.5, this.velocidad / VELOCIDAD_AGITACION);
+    this.calcularPatas();
+  }
+
   /** Ruido Perlin en [0,1]. Usa el de p5 si está disponible. */
   ruido(a, b) {
     if (this.p && typeof this.p.noise === 'function') return this.p.noise(a, b);
@@ -128,7 +234,7 @@ class Spider {
     const rot = this.rotacion;
     const cos = Math.cos(rot);
     const sen = Math.sin(rot);
-    const escala = this.tamano;
+    const escala = this.tamano * this.escala;
 
     // Cuando la araña está de canto el cuerpo se ve más angosto.
     const vuelta = Math.abs(Math.sin(this.vuelco));
@@ -139,30 +245,40 @@ class Spider {
     for (const pata of this.patas) {
       const angLocal = ANGULOS_PATAS[pata.indice] * Math.PI / 180;
 
-      // --- Ciclo colgante: pataleo global + fase propia + ruido asimétrico ---
-      // Con la mano rápido, el ciclo se acelera y se agita más (RF-07).
-      // En defensa el ciclo se frena y se achica: la araña se acurruca.
+      // --- Ciclo según el estado ---
+      // Colgando: pataleo asimétrico con ruido (RF-07, S18).
+      // Trepando: las patas van alternadas, como una trepada de verdad (RF-13).
+      // Lanzándose: las patas se abren en susto y se recuperan (RF-16).
       const agit = this.agitacion;
-      const defensa = this.defensa;
-      const calma = 1 - 0.8 * defensa;
-      const ciclo = this.tiempo * (2.1 + agit * 3.5) * calma + pata.fase;
-      const pataleo = Math.sin(this.tiempo * (0.85 + agit * 1.6) * calma + this.fase)
-        * (1 - 0.85 * defensa);
+      const trepando = this.estado === ESTADOS_ARAÑA.TREPANDO;
       const ruidoPata = this.ruido(pata.indice * 7.3 + (pata.lado > 0 ? 0 : 31.7), this.tiempo * 0.5);
 
-      let alcance = alcanceMax * (
-        0.62
-        + (0.12 + 0.10 * agit) * Math.sin(ciclo)
-        + (0.09 + 0.12 * agit) * pataleo
-        + 0.14 * (ruidoPata - 0.5)
-      );
+      let alcance;
+      if (trepando) {
+        // Alterna por lado y por pata: nunca se mueven todas juntas.
+        const alterna = Math.sin(
+          this.tiempo * 7 * this.velocidadTrepada
+          + (pata.lado > 0 ? 0 : Math.PI)
+          + pata.indice * 0.5
+        );
+        alcance = alcanceMax * (0.5 + 0.16 * alterna + 0.06 * (ruidoPata - 0.5));
+      } else {
+        const ciclo = this.tiempo * (2.1 + agit * 3.5) + pata.fase;
+        const pataleo = Math.sin(this.tiempo * (0.85 + agit * 1.6) + this.fase);
+        alcance = alcanceMax * (
+          0.62
+          + (0.12 + 0.10 * agit) * Math.sin(ciclo)
+          + (0.09 + 0.12 * agit) * pataleo
+          + 0.14 * (ruidoPata - 0.5)
+        );
+      }
       alcance = Math.max(alcanceMax * 0.35, Math.min(alcanceMax * 0.98, alcance));
-      // Las patas se recogen contra el cuerpo (postura defensiva).
-      alcance *= (1 - 0.45 * defensa);
+      // Susto: las patas se estiran hacia afuera (RF-16).
+      alcance *= 1 + 0.4 * this.susto;
 
       // Dirección de la pata en el mundo (el lado -y espeja el ángulo).
       const angMundo = rot + angLocal * pata.lado;
-      const desvio = (ruidoPata - 0.5) * (0.25 + 0.35 * agit) * (1 - 0.7 * defensa);
+      const desvio = (ruidoPata - 0.5) * (0.25 + 0.35 * agit + 0.4 * this.susto);
       const dirX = Math.cos(angMundo + desvio);
       const dirY = Math.sin(angMundo + desvio);
 
@@ -232,10 +348,13 @@ class Spider {
 
   /**
    * Dibuja la araña: patas lejanas, cuerpo, patas cercanas.
+   * Si está escondida en la palma no se dibuja nada (RF-14).
    * @param {p5} p instancia de p5
    */
   draw(p) {
-    const escala = this.tamano;
+    if (this.estado === ESTADOS_ARAÑA.OCULTA) return;
+
+    const escala = this.tamano * this.escala;
     const vuelta = Math.abs(Math.sin(this.vuelco));
     const anchoCuerpo = 0.6 + 0.4 * vuelta;
     const opacidad = Math.max(0, Math.min(1, this.opacidad));

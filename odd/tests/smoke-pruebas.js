@@ -248,68 +248,147 @@
   assert(Math.max.apply(null, visibilidades) > 0.7, 'el vientre llega a verse (marca roja)');
   assert(Math.min.apply(null, visibilidades) < 0.4, 'el vientre también se oculta a ratos');
 
-  // --- Fase 2 · Bloque 1: el reconocedor de gestos (clasificador puro) ---
-  // (tests del clasificador: no dependen de la cámara, así que van fuera del
-  //  bloque que necesita detectStart)
+  // --- Fase 2 · Bloque 1: gestures.js (puño con histéresis y separación) ---
+  // (no depende de la cámara, así que va fuera del bloque que necesita detectStart)
 
-  const clasificarFalsa = (curls) => {
-    const pts = manoFalsa(curls);
-    return Mano.clasificar({ curl: Mano.calcularCurl(pts), puntos: pts });
-  };
+  const CFG_GESTOS = { fistCloseThreshold: 0.75, fistOpenThreshold: 0.5, fistHoldMs: 150 };
+  const CFG_SEP = { spreadOn: 0.35, spreadOff: 0.25 };
 
-  assert(clasificarFalsa([0, 0, 0, 0, 0]).id === 'abierta',
-    'mano estirada → gesto "mano abierta"');
-  assert(clasificarFalsa([1, 1, 1, 1, 1]).id === 'puño',
-    'mano cerrada → gesto "puño"');
-  assert(clasificarFalsa([0, 0, 1, 1, 1]).id === 'indice',
-    'sólo el índice extendido → gesto "índice"');
-  assert(clasificarFalsa([0, 0, 0, 1, 1]).id === 'paz',
-    'índice y medio extendidos → gesto "paz"');
-
-  // Pellizco: las puntas del pulgar y del índice se tocan, con el índice apenas
-  // doblado (curl bajo) y el pulgar no enroscado.
-  const manoPellizco = manoFalsa([0, 0, 0, 0, 0]);
-  manoPellizco[8] = { x: 300, y: 232.5, z: 0, score: 1, name: Mano.NOMBRES[8] };
-  manoPellizco[4] = { x: 300, y: 232.5, z: 0, score: 1, name: Mano.NOMBRES[4] };
-  const gestoPellizco = Mano.clasificar({
-    curl: Mano.calcularCurl(manoPellizco),
-    puntos: manoPellizco
+  /** Mano sintética con curls explícitos (los puntos se binarizan). */
+  const gestosMano = (curls, handedness) => ({
+    handedness: handedness || 'Right',
+    curl: curls,
+    puntos: manoFalsa(curls.map((c) => (c > 0.6 ? 1 : 0)))
   });
-  assert(gestoPellizco.id === 'pellizco',
-    'pulgar e índice juntos → gesto "pellizco" (id ' + gestoPellizco.id + ')');
 
-  // Un puño no se confunde con un pellizco: en el puño el índice está muy
-  // doblado, así que el pellizco se descarta y gana el puño.
-  const curledPuno = clasificarFalsa([1, 1, 1, 1, 1]);
-  assert(curledPuno.id === 'puño', 'el puño no se clasifica como pellizco');
+  const detector = Gestos.crear();
+  // El pulgar (índice 0) queda estirado a propósito: se ignora (RF-11).
+  const manoPuño = gestosMano([0, 0.9, 0.9, 0.9, 0.9]);
+  const manoAbierta = gestosMano([0, 0, 0, 0, 0]);
 
-  // --- Fase 2 · Bloque 1: estabilidad del gesto (no parpadea) ---
-  const detector = new Mano.Gestos();
-  const manoAbierta = {
-    curl: Mano.calcularCurl(manoFalsa([0, 0, 0, 0, 0])),
-    puntos: manoFalsa([0, 0, 0, 0, 0]),
-    handedness: 'Right'
-  };
-  const manoPuno = {
-    curl: Mano.calcularCurl(manoFalsa([1, 1, 1, 1, 1])),
-    puntos: manoFalsa([1, 1, 1, 1, 1]),
-    handedness: 'Right'
-  };
+  let rg = detector.actualizar([manoPuño], 0.016, CFG_GESTOS);
+  assert(rg[0].enPuño === false, 'el puño no se confirma en el primer frame');
+  assert(detector.isFist(manoPuño) === false, 'isFist() todavía devuelve false');
 
-  const g1 = detector.actualizar([manoAbierta], { framesEstables: 2 });
-  assert(g1[0].gesto.id === 'abierta', 'el primer frame ya define el gesto inicial');
-  assert(g1[0].cambio === false, 'la aparición de la mano no cuenta como cambio de gesto');
+  let flanco = false;
+  for (let i = 0; i < 10; i++) {
+    rg = detector.actualizar([manoPuño], 0.016, CFG_GESTOS);
+    if (rg[0].cambio) flanco = true;
+  }
+  assert(rg[0].enPuño === true, 'con el curl sostenido 150 ms el puño se confirma (RF-12)');
+  assert(detector.isFist(manoPuño) === true, 'isFist(hand) devuelve true');
+  assert(flanco === true, 'el flanco del puño se reporta al confirmarse');
 
-  const g2 = detector.actualizar([manoPuno], { framesEstables: 2 });
-  assert(g2[0].gesto.id === 'abierta', 'un solo frame no cambia el gesto (estabilidad)');
-  assert(g2[0].cambio === false, 'no se reporta cambio hasta confirmar el gesto');
+  rg = detector.actualizar([manoPuño], 0.016, CFG_GESTOS);
+  assert(rg[0].cambio === false, 'el flanco no se repite mientras siga el puño');
 
-  const g3 = detector.actualizar([manoPuno], { framesEstables: 2 });
-  assert(g3[0].gesto.id === 'puño', 'a los 2 frames seguidos el gesto nuevo se confirma');
-  assert(g3[0].cambio === true, 'el cambio de gesto se reporta');
+  // Histéresis: entre 0.5 y 0.75 sigue siendo puño; recién sale por debajo de 0.5.
+  const manoCurlMedio = gestosMano([0, 0.6, 0.6, 0.6, 0.6]);
+  rg = detector.actualizar([manoCurlMedio], 0.016, CFG_GESTOS);
+  assert(rg[0].enPuño === true, 'con curl 0.6 sigue siendo puño (histéresis, RF-12)');
+  const manoSuelta = gestosMano([0, 0.3, 0.3, 0.3, 0.3]);
+  rg = detector.actualizar([manoSuelta], 0.016, CFG_GESTOS);
+  assert(rg[0].enPuño === false, 'por debajo de 0.5 el puño se suelta');
 
-  const g4 = detector.actualizar([manoPuno], { framesEstables: 2 });
-  assert(g4[0].cambio === false, 'el cambio se reporta una sola vez (no cada frame)');
+  // Frames sueltos por encima del umbral no alcanzan: hace falta sostenerlo.
+  const detector2 = Gestos.crear();
+  const manoIntermitente = gestosMano([0, 0.9, 0.9, 0.9, 0.9], 'Left');
+  detector2.actualizar([manoIntermitente], 0.05, CFG_GESTOS);
+  detector2.actualizar([gestosMano([0, 0, 0, 0, 0], 'Left')], 0.05, CFG_GESTOS);
+  detector2.actualizar([manoIntermitente], 0.05, CFG_GESTOS);
+  assert(detector2.isFist(manoIntermitente) === false,
+    'un frame suelto por encima del umbral no confirma el puño (el contador se reinicia)');
+
+  // spreadValue: distancia entre dos puntas normalizada por el tamaño de la mano.
+  const puntosSeparados = manoFalsa([0, 0, 0, 0, 0]);
+  const tamanoMano = Math.hypot(
+    puntosSeparados[9].x - puntosSeparados[0].x,
+    puntosSeparados[9].y - puntosSeparados[0].y
+  );
+  const spreadEsperado = Math.hypot(
+    puntosSeparados[4].x - puntosSeparados[8].x,
+    puntosSeparados[4].y - puntosSeparados[8].y
+  ) / tamanoMano;
+  const manoSeparada = { handedness: 'Right', puntos: puntosSeparados };
+
+  assert(Math.abs(Gestos.spreadValue(manoSeparada, 'pulgar', 'indice') - spreadEsperado) < 1e-9,
+    'spreadValue() normaliza por el tamaño de la mano (muñeca → nudillo del medio)');
+  assert(Gestos.spreadValue(manoSeparada, 0, 1) === Gestos.spreadValue(manoSeparada, 'pulgar', 'indice'),
+    'spreadValue() acepta el dedo por nombre o por índice (0 = pulgar)');
+
+  // La separación también usa histéresis (RF-28): entra en 0.35, sale en 0.25.
+  const detector3 = Gestos.crear();
+  const ptsBanda = manoFalsa([0, 0, 0, 0, 0]);
+  ptsBanda[4] = { x: 300, y: 324, z: 0, score: 1, name: Mano.NOMBRES[4] };
+  ptsBanda[8] = { x: 300, y: 342, z: 0, score: 1, name: Mano.NOMBRES[8] };
+  const manoEnBanda = { handedness: 'Right', puntos: ptsBanda };
+  const valorBanda = Gestos.spreadValue(manoEnBanda, 'pulgar', 'indice');
+  assert(valorBanda > 0.25 && valorBanda < 0.35,
+    'la mano de prueba cae en la banda de histéresis: ' + valorBanda.toFixed(2));
+
+  detector3.actualizar([manoEnBanda], 0.016, CFG_SEP);
+  assert(detector3.spreadActivo(manoEnBanda, 'pulgar', 'indice', CFG_SEP) === false,
+    'en la banda, sin haber superado 0.35, no se activa');
+  detector3.actualizar([manoSeparada], 0.016, CFG_SEP);
+  assert(detector3.spreadActivo(manoSeparada, 'pulgar', 'indice', CFG_SEP) === true,
+    'con los dedos separados la telaraña se activa');
+  detector3.actualizar([manoEnBanda], 0.016, CFG_SEP);
+  assert(detector3.spreadActivo(manoEnBanda, 'pulgar', 'indice', CFG_SEP) === true,
+    'ya activa, sigue activa dentro de la banda (histéresis)');
+  const ptsJuntos = manoFalsa([0, 0, 0, 0, 0]);
+  ptsJuntos[4] = { x: 300, y: 350, z: 0, score: 1, name: Mano.NOMBRES[4] };
+  ptsJuntos[8] = { x: 300, y: 342, z: 0, score: 1, name: Mano.NOMBRES[8] };
+  const manoJunta = { handedness: 'Right', puntos: ptsJuntos };
+  detector3.actualizar([manoJunta], 0.016, CFG_SEP);
+  assert(detector3.spreadActivo(manoJunta, 'pulgar', 'indice', CFG_SEP) === false,
+    'por debajo de 0.25 la separación se desactiva');
+
+  // --- Fase 2 · Bloque 2: los estados de la araña ---
+  const p5Stub = global.__p5[0];
+  const arañaEstados = new Spider({ tamano: 1, fase: 0, p: p5Stub });
+
+  assert(arañaEstados.estado === Spider.ESTADOS.COLGANDO, 'la araña arranca HANGING');
+  assert(arañaEstados.progreso === 0, 'el progreso de trepada arranca en 0');
+
+  arañaEstados.trepar(0.4, 1);
+  assert(arañaEstados.estado === Spider.ESTADOS.TREPANDO, 'trepar() la pasa a CLIMBING');
+  assert(arañaEstados.progreso > 0 && arañaEstados.progreso < 1,
+    'el progreso de trepada avanza: ' + arañaEstados.progreso.toFixed(2));
+  assert(arañaEstados.escala < 1, 'mientras trepa la araña se achica (RF-14): ' + arañaEstados.escala.toFixed(2));
+
+  arañaEstados.trepar(10, 1);
+  assert(arañaEstados.progreso === 1, 'el progreso no pasa de 1: llegó a la palma');
+  assert(arañaEstados.escala <= 0.61, 'al llegar arriba está al 60 % de su tamaño');
+  arañaEstados.ocultar();
+  assert(arañaEstados.estado === Spider.ESTADOS.OCULTA, 'al llegar a la palma queda HIDDEN');
+
+  p5Stub.ellipseCalls = 0;
+  arañaEstados.draw(p5Stub);
+  assert(p5Stub.ellipseCalls === 0, 'la araña oculta no se dibuja');
+
+  arañaEstados.lanzar(6, -4);
+  assert(arañaEstados.estado === Spider.ESTADOS.LANZANDO, 'lanzar() la pasa a LAUNCHING');
+  assert(arañaEstados.susto === 1, 'al lanzarse las patas se abren en susto (RF-16)');
+
+  const xLanzada = arañaEstados.x;
+  const yLanzada = arañaEstados.y;
+  arañaEstados.actualizarLanzamiento(0.1, 0.55, 0.99, { x: xLanzada, y: yLanzada });
+  assert(arañaEstados.x !== xLanzada || arañaEstados.y !== yLanzada,
+    'en el lanzamiento la araña se mueve con su impulso');
+
+  for (let i = 0; i < 40; i++) {
+    arañaEstados.actualizarLanzamiento(0.016, 0.55, 0.99, { x: arañaEstados.x, y: arañaEstados.y });
+  }
+  assert(arañaEstados.susto < 0.2,
+    'las patas de susto se recuperan en ~0.5 s: ' + arañaEstados.susto.toFixed(2));
+
+  arañaEstados.colgar();
+  assert(arañaEstados.estado === Spider.ESTADOS.COLGANDO, 'colgar() la devuelve a HANGING');
+
+  p5Stub.ellipseCalls = 0;
+  arañaEstados.update({ x: 400, y: 300 }, Math.PI / 2, 0);
+  arañaEstados.draw(p5Stub);
+  assert(p5Stub.ellipseCalls > 0, 'la araña que volvió a colgar se dibuja de nuevo');
 
   // --- T5/T6: una araña por cuerda en el sketch ---
   // (guard: en los escenarios sin cámara o sin modelo no hay detectStart)
@@ -382,63 +461,89 @@
   assert(reenganchada.cuerda.anclada === true, 'la araña se vuelve a enganchar');
   assert(reenganchada.opacidad === 1, 'vuelve a verse opaca');
 
-  // --- Fase 2 · Bloque 2: el puño repliega a las arañas y al abrir vuelven ---
+  // --- Fase 2 · Bloque 2: el puño hace trepar a las arañas y las esconde ---
   global.__ml5.detectStart.cb([manoAppEstirada]);
   avanzar(50);
   const colgada = p.colgantes.get('Right-0');
   const largoColgada = colgada.cuerda.longitud;
-  assert(colgada.araña.defensa < 0.05,
-    'con la mano abierta la araña cuelga normal (defensa ' + colgada.araña.defensa.toFixed(2) + ')');
-  assert(__els.get('info-gesto').textContent === 'Mano abierta',
-    'el HUD informa el gesto: "' + __els.get('info-gesto').textContent + '"');
+  assert(colgada.araña.estado === Spider.ESTADOS.COLGANDO,
+    'con la mano abierta la araña cuelga (HANGING)');
 
   global.__ml5.detectStart.cb([manoAppCerrada]);
-  avanzar(60);
-  const enPuno = p.colgantes.get('Right-0');
-  assert(enPuno.araña.defensa > 0.9,
-    'con el puño la araña se repliega (defensa ' + enPuno.araña.defensa.toFixed(2) + ')');
-  assert(Number.isFinite(enPuno.araña.x) && Number.isFinite(enPuno.araña.y),
-    'con el puño la araña sigue en una posición válida');
-  assert(Number.isFinite(enPuno.cuerda.endAngle()),
-    'el ángulo de la cuerda sigue siendo válido con el hilo replegado');
-  assert(enPuno.cuerda.longitud < largoColgada * 0.4,
-    'el hilo se repliega con el puño: ' + Math.round(largoColgada) + ' → '
-    + Math.round(enPuno.cuerda.longitud) + ' px');
-  assert(__els.get('info-gesto').textContent === 'Puño',
-    'el HUD informa el puño: "' + __els.get('info-gesto').textContent + '"');
+  avanzar(30);   // la histéresis pide 150 ms (10 frames) y después empieza la trepada
+  const trepando = p.colgantes.get('Right-0');
+  assert(trepando.araña.estado === Spider.ESTADOS.TREPANDO,
+    'con el puño la araña pasa a CLIMBING');
+  assert(trepando.araña.progreso > 0 && trepando.araña.progreso < 1,
+    'la araña está trepando: ' + trepando.araña.progreso.toFixed(2));
+  assert(trepando.cuerda.longitud < largoColgada - 20,
+    'el hilo se acorta mientras trepa: ' + Math.round(largoColgada) + ' → '
+    + Math.round(trepando.cuerda.longitud) + ' px');
 
+  avanzar(90);
+  const escondida = p.colgantes.get('Right-0');
+  assert(escondida.araña.estado === Spider.ESTADOS.OCULTA,
+    'al llegar a la palma la araña queda HIDDEN');
+  p.hiloCalls = 0;
+  p.ellipseCalls = 0;
+  p.draw();
+  assert(p.ellipseCalls === 0, 'la araña escondida no se dibuja');
+  assert(p.hiloCalls === 0, 'y su hilo tampoco (RF-14)');
+
+  // --- Fase 2 · Bloque 2: al abrir la mano salen disparadas y vuelven a colgar ---
   global.__ml5.detectStart.cb([manoAppEstirada]);
-  avanzar(60);
-  const reabierta = p.colgantes.get('Right-0');
-  assert(reabierta.araña.defensa < 0.05,
-    'al abrir la mano la araña vuelve a colgar (defensa ' + reabierta.araña.defensa.toFixed(2) + ')');
-  assert(reabierta.cuerda.longitud > largoColgada * 0.85,
-    'al abrir la mano el hilo vuelve a su largo: ' + Math.round(reabierta.cuerda.longitud) + ' px');
-  assert(__els.get('info-gesto').textContent === 'Mano abierta',
-    'el HUD vuelve a informar "mano abierta"');
+  avanzar(40);   // más que el retraso escalonado máximo (250 ms)
+  const lanzada = p.colgantes.get('Right-0');
+  assert(lanzada.araña.estado === Spider.ESTADOS.LANZANDO || lanzada.araña.estado === Spider.ESTADOS.COLGANDO,
+    'al abrir la mano la araña sale del escondite: ' + lanzada.araña.estado);
+  assert(lanzada.araña.estado !== Spider.ESTADOS.OCULTA, 'ya no está escondida');
+  assert(Number.isFinite(lanzada.araña.x) && Number.isFinite(lanzada.araña.y),
+    'la araña lanzada está en una posición válida');
 
-  // La pose defensiva recoge las patas contra el cuerpo. Se comparan dos
-  // arañas con la misma fase y la misma pose, así la comparación es estable.
-  const arañaLibre = new Spider({ tamano: 1, fase: 0, p: global.__p5[0] });
-  const arañaAcurrada = new Spider({ tamano: 1, fase: 0, p: global.__p5[0] });
-  const alcanceMax = (araña) => {
-    let max = 0;
-    for (const pt of araña.patas) {
-      max = Math.max(max, Math.hypot(pt.pie.x - pt.coxa.x, pt.pie.y - pt.coxa.y));
-    }
-    return max;
-  };
-  let maxLibre = 0;
-  let maxAcurrada = 0;
-  for (let i = 0; i < 60; i++) {
-    arañaLibre.update({ x: 400, y: 300 }, Math.PI / 2, 0, 0);
-    arañaAcurrada.update({ x: 400, y: 300 }, Math.PI / 2, 0, 1);
-    maxLibre = Math.max(maxLibre, alcanceMax(arañaLibre));
-    maxAcurrada = Math.max(maxAcurrada, alcanceMax(arañaAcurrada));
-  }
-  assert(maxAcurrada < maxLibre * 0.75,
-    'la pose defensiva recoge las patas contra el cuerpo: '
-    + maxLibre.toFixed(1) + ' → ' + maxAcurrada.toFixed(1) + ' px');
+  avanzar(240);
+  const deVuelta = p.colgantes.get('Right-0');
+  assert(deVuelta.araña.estado === Spider.ESTADOS.COLGANDO,
+    'después del lanzamiento vuelve a colgar: ' + deVuelta.araña.estado);
+  assert(deVuelta.cuerda.longitud > largoColgada * 0.8,
+    'el hilo vuelve a su largo: ' + Math.round(deVuelta.cuerda.longitud) + ' px');
+
+  // --- Fase 2 · Bloque 2: RF-17, el puño tiene prioridad sobre el curl ---
+  global.__ml5.detectStart.cb([manoAppCerrada]);
+  avanzar(30);
+  const enPuno = p.colgantes.get('Right-0');
+  const largoEnPuno = enPuno.cuerda.longitud;
+  assert(enPuno.araña.estado === Spider.ESTADOS.TREPANDO, 'sigue trepando con el puño');
+  assert(enPuno.araña.progreso > 0, 'el progreso lo lleva el puño, no el curl');
+
+  // --- Fase 2 · Bloque 2: RF-18, si la mano se va con las arañas escondidas ---
+  avanzar(90);
+  assert(p.colgantes.get('Right-0').araña.estado === Spider.ESTADOS.OCULTA,
+    'la araña llegó a la palma y quedó escondida');
+  const yEscondida = p.colgantes.get('Right-0').araña.y;
+  global.__ml5.detectStart.cb([]);   // la mano desaparece
+  avanzar(100);
+  const trasPerderMano = p.colgantes.get('Right-0');
+  assert(trasPerderMano === undefined || trasPerderMano.araña.estado !== Spider.ESTADOS.OCULTA,
+    'si la mano desaparece, la araña escondida no queda colgada en el limbo (RF-18)');
+  avanzar(80);
+  assert(p.colgantes.get('Right-0') === undefined,
+    'y termina de caer y desvanecerse como en RF-08');
+
+  // --- Fase 2 · Bloque 2: la tecla F apaga la feature del puño (RNF-08) ---
+  global.__ml5.detectStart.cb([manoAppEstirada]);
+  avanzar(20);
+  p.key = 'f';
+  p.keyPressed();
+  global.__ml5.detectStart.cb([manoAppCerrada]);
+  avanzar(60);
+  const conFeatureApagada = p.colgantes.get('Right-0');
+  assert(conFeatureApagada.araña.estado === Spider.ESTADOS.COLGANDO,
+    'con la feature apagada (F) el puño no hace trepar a la araña');
+  p.key = 'f';
+  p.keyPressed();
+  avanzar(40);
+  assert(p.colgantes.get('Right-0').araña.estado === Spider.ESTADOS.TREPANDO,
+    'al volver a prenderla, el puño vuelve a hacer trepar a la araña');
   }
 
   // --- T9/T10: audio procedural ---

@@ -70,6 +70,25 @@ class Rope {
     this.anclada = false;
   }
 
+  /**
+   * Tira del extremo libre hacia un punto, con un resorte suave. Se usa en el
+   * lanzamiento (RF-15): el hilo se estira detrás de la araña y la trae de
+   * vuelta con el rebote elástico.
+   *
+   * El punto de velocidad se mueve junto con la posición: si no, el próximo
+   * paso de Verlet leería el arrastre como una velocidad enorme.
+   */
+  tirarDe(x, y, fuerza) {
+    const fin = this.puntos[this.puntos.length - 1];
+    const k = fuerza === undefined ? 0.25 : fuerza;
+    const dx = (x - fin.x) * k;
+    const dy = (y - fin.y) * k;
+    fin.x += dx;
+    fin.y += dy;
+    fin.px += dx;
+    fin.py += dy;
+  }
+
   /** Vuelve a anclar la cuerda (la mano reapareció). */
   anclar() {
     this.anclada = true;
