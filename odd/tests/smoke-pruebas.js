@@ -439,6 +439,11 @@
 
   // --- T7: el curl acorta el hilo y la araña sube por él ---
   const manoAppEstirada = { keypoints: aPuntos(manoFalsa([0, 0, 0, 0, 0])), handedness: 'Right' };
+  // Sólo el pulgar doblado: los cuatro dedos largos quedan estirados, así que
+  // RF-06 (el curl acorta el hilo) se prueba sin que se dispare el puño, que
+  // tiene prioridad (RF-17).
+  const manoAppPulgar = { keypoints: aPuntos(manoFalsa([1, 0, 0, 0, 0])), handedness: 'Right' };
+  // Mano cerrada de verdad: los cinco dedos, que es un puño (RF-11).
   const manoAppCerrada = { keypoints: aPuntos(manoFalsa([1, 1, 1, 1, 1])), handedness: 'Right' };
 
   global.__ml5.detectStart.cb([manoAppEstirada]);
@@ -447,7 +452,7 @@
   const largoEstirado = estirada.cuerda.longitud;
   const distEstirada = estirada.araña.y - estirada.cuerda.puntos[0].y;
 
-  global.__ml5.detectStart.cb([manoAppCerrada]);
+  global.__ml5.detectStart.cb([manoAppPulgar]);
   avanzar(40)
   const appCerrada = p.colgantes.get('Right-0');
   const largoCerrado = appCerrada.cuerda.longitud;
@@ -513,7 +518,7 @@
     'con el puño la araña pasa a CLIMBING');
   assert(trepando.araña.progreso > 0 && trepando.araña.progreso < 1,
     'la araña está trepando: ' + trepando.araña.progreso.toFixed(2));
-  assert(trepando.cuerda.longitud < largoColgada - 20,
+  assert(trepando.cuerda.longitud < largoColgada * 0.95,
     'el hilo se acorta mientras trepa: ' + Math.round(largoColgada) + ' → '
     + Math.round(trepando.cuerda.longitud) + ' px');
 
@@ -544,6 +549,7 @@
   // Se registra en qué frame sale cada araña: la salida tiene que ser
   // escalonada (RF-15) y no todas en el mismo frame.
   const framesDeSalida = new Map();
+  let estadosFinales = '';
   for (let i = 0; i < 40; i++) {
     p.frameCount++;
     p.draw();
@@ -552,8 +558,13 @@
         framesDeSalida.set(clave, i);
       }
     }
+    estadosFinales = Array.from(p.colgantes)
+      .map(([k, c]) => k + '=' + c.araña.estado + '(' + c.araña.progreso.toFixed(2) + ')')
+      .join(' ');
   }
-  assert(framesDeSalida.size === 5, 'las 5 arañas salen del escondite al abrir la mano');
+  assert(framesDeSalida.size === 5,
+    'las 5 arañas salen del escondite al abrir la mano (salieron ' + framesDeSalida.size
+    + '; al final: ' + estadosFinales + ')');
   assert(new Set(Array.from(framesDeSalida.values())).size > 1,
     'no salen todas en el mismo frame: la salida está escalonada (RF-15)');
 

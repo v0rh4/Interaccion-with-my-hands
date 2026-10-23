@@ -55,11 +55,21 @@ const CONFIG = {
   puno: {
     // Fase 2 · Bloque 2: qué pasa cuando la mano hace puño.
     climbSpeed: 1.15,          // progreso de trepada por segundo (RF-13)
-    hiloTrepada: 0.85,         // cuánto se acorta el hilo al llegar a la palma (RF-14)
+    // DECISIÓN: el hilo se acorta hasta el 45 % y no más. Con el 15 % el tramo
+    // por segmento baja a ~1.5 px y la cadena Verlet se vuelve degenerada: el
+    // extremo libre se dispara (llega a quedar por encima del ancla) y el
+    // lanzamiento se vuelve impredecible. Al 45 % el tramo es de ~4.5 px y la
+    // sonda da una oscilación normal de ~7 px (RF-14).
+    hiloTrepada: 0.55,
     launchForce: 7,            // impulso del lanzamiento, px por frame (RF-15)
     launchDelayMs: 250,        // retraso escalonado máximo por araña (RF-15)
     launchGravedad: 0.35,      // gravedad durante el vuelo (RF-15)
     launchAmortiguacion: 0.985, // retención de velocidad durante el vuelo (RF-15)
+    // DECISIÓN: no se evalúa el re-enganche durante el primer tramo del vuelo.
+    // Al salir, la araña y el extremo del hilo arrancan casi en el mismo punto,
+    // así que sin este mínimo se volvería a colgar en el mismo frame y no se
+    // vería el estirón elástico que pide RF-15.
+    vueloMinimo: 0.12,
     launchDuracion: 1.4        // tope de seguridad del vuelo, en segundos
   },
   audio: {
@@ -357,8 +367,9 @@ const esquema = (p) => {
                 + (Math.random() - 0.5) * 0.9;
               const fuerza = CONFIG.puno.launchForce * (0.7 + Math.random() * 0.6);
               araña.lanzar(Math.cos(ang) * fuerza, Math.sin(ang) * fuerza);
-              // El hilo se estira: se rearma a su largo completo.
-              colgante.cuerda = new Rope(punta.x, punta.y, base, CONFIG.segmentos);
+              // El hilo se estira solo: el largo del estado LANZANDO es el
+              // completo, así que la cuerda se alarga detrás de la araña con el
+              // rebote elástico de RF-15 (no se recrea, se estira).
               colgante.espera = undefined;
               colgante.tiempoLanzamiento = 0;
               colgante.sonarLanzamiento = true;
@@ -411,7 +422,10 @@ const esquema = (p) => {
 
           const finAhora = colgante.cuerda.endPoint();
           const cerca = Math.hypot(araña.x - finAhora.x, araña.y - finAhora.y) < 14;
-          if (cerca || colgante.tiempoLanzamiento > CONFIG.puno.launchDuracion) {
+          // Recién pasados unos frames de vuelo se puede volver a colgar: al
+          // salir, la araña y el extremo del hilo están casi en el mismo punto.
+          if (colgante.tiempoLanzamiento > CONFIG.puno.vueloMinimo
+            && (cerca || colgante.tiempoLanzamiento > CONFIG.puno.launchDuracion)) {
             araña.colgar();
           }
         } else {
