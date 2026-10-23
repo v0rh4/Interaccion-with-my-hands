@@ -113,8 +113,8 @@ El usuario agregó el spec de la Fase 2 a `spec.md` **después** de aprobar la p
 | T11 | S42 | `README.md` con cómo ejecutar (`python -m http.server` o Live Server) | inline | hecho | 20bb805 |
 | T12 | S48, S50-S52, S54 | Fase 2 · Bloque 1 (interpretación previa: clasificador de 5 gestos) | inline | reemplazado por T14 | e8118f9 |
 | T13 | S49, S53, S54 | Fase 2 · Bloque 2 (interpretación previa: "defensa" que acorta el hilo) | inline | reemplazado por T15 | fe0846f |
-| T14 | S55-S58, S62 | Fase 2 · Bloque 1 real: `gestures.js` (`isFist` con histéresis + `spreadValue`) y overlay de debug | inline | hecho | (pendiente) |
-| T15 | S59-S62 | Fase 2 · Bloque 2 real: estados `HANGING/CLIMBING/HIDDEN/LAUNCHING`, trepada y lanzamiento escalonado | inline | hecho | (pendiente) |
+| T14 | S55-S58, S62 | Fase 2 · Bloque 1 real: `gestures.js` (`isFist` con histéresis + `spreadValue`) y overlay de debug | inline | hecho | 2737a9f |
+| T15 | S59-S62 | Fase 2 · Bloque 2 real: estados `HANGING/CLIMBING/HIDDEN/LAUNCHING`, trepada y lanzamiento escalonado | inline | hecho | 2737a9f |
 
 Nota de numeración: el usuario numera esta fase como "tareas 10 a 13" (Bloque 1 = gestos, Bloque 2 = puño). En este documento las tareas 10 y 11 ya estaban tomadas por el audio y el README, así que la fase 2 queda como T12 y T13.
 
